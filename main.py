@@ -1,4 +1,5 @@
 """应用入口：启动 GUI + 后台网关线程"""
+
 import sys
 import threading
 
@@ -27,6 +28,7 @@ def main():
 
     # 等待网关启动
     import time
+
     time.sleep(1.5)
 
     # 启动 GUI
@@ -42,6 +44,7 @@ def main():
         import asyncio
 
         from app.providers import ProviderFactory
+
         asyncio.run(ProviderFactory.close_all())
 
     app.aboutToQuit.connect(on_exit)

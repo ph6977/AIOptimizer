@@ -1,4 +1,7 @@
 """设置页面"""
+
+from typing import Any, cast
+
 import httpx
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -19,19 +22,31 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.core.config import settings
+from app.core.config import ProviderConfig, settings
+
+
+class ProviderRowData:
+    def __init__(
+        self, name: str, display_name: str, api_key: str, base_url: str, models: str
+    ) -> None:
+        self.name = name
+        self.display_name = display_name
+        self.api_key = api_key
+        self.base_url = base_url
+        self.models = models
+        self.enabled = True
 
 
 class SettingsPage(QWidget):
     config_saved = Signal()
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.provider_rows = []
+        self.provider_rows: list[int] = []
         self._init_ui()
         self.load_config()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -97,10 +112,12 @@ class SettingsPage(QWidget):
         # 表格
         self.provider_table = QTableWidget()
         self.provider_table.setColumnCount(6)
-        self.provider_table.setHorizontalHeaderLabels([
-            "名称", "显示名", "API Key", "Base URL", "模型(逗号分隔)", "启用"
-        ])
-        self.provider_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.provider_table.setHorizontalHeaderLabels(
+            ["名称", "显示名", "API Key", "Base URL", "模型(逗号分隔)", "启用"]
+        )
+        self.provider_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         provider_layout.addWidget(self.provider_table)
 
         # 按钮行
@@ -130,7 +147,7 @@ class SettingsPage(QWidget):
 
         self.form_layout.addStretch()
 
-    def load_config(self):
+    def load_config(self) -> None:
         self.host_edit.setText(settings.gateway_host)
         self.port_spin.setValue(settings.gateway_port)
         self.compress_enabled.setChecked(settings.compression_enabled)
@@ -144,22 +161,66 @@ class SettingsPage(QWidget):
         # 加载 Provider
         providers = settings.get_providers()
         for p in providers:
-            self._add_provider_row(p)
+            self._add_provider_row(
+                ProviderRowData(
+                    name=p.name,
+                    display_name=p.display_name,
+                    api_key=p.api_key,
+                    base_url=p.base_url,
+                    models=",".join(p.models),
+                )
+            )
 
         if not providers:
             # 默认添加几个常见的
             defaults = [
-                ("openai", "OpenAI", "", "https://api.openai.com/v1", "gpt-4o,gpt-4o-mini"),
-                ("deepseek", "DeepSeek", "", "https://api.deepseek.com", "deepseek-chat,deepseek-reasoner"),
-                ("glm", "Zhipu GLM", "", "https://open.bigmodel.cn/api/paas/v4", "glm-4,glm-4v"),
-                ("qwen", "Alibaba Qwen", "", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-max,qwen-plus,qwen-turbo"),
-                ("kimi", "Moonshot Kimi", "", "https://api.moonshot.cn/v1", "moonshot-v1-8k,moonshot-v1-32k,moonshot-v1-128k"),
-                ("ollama", "Ollama (本地)", "", "http://localhost:11434/v1", "llama3.1,qwen2.5,deepseek-r1"),
+                (
+                    "openai",
+                    "OpenAI",
+                    "",
+                    "https://api.openai.com/v1",
+                    "gpt-4o,gpt-4o-mini",
+                ),
+                (
+                    "deepseek",
+                    "DeepSeek",
+                    "",
+                    "https://api.deepseek.com",
+                    "deepseek-chat,deepseek-reasoner",
+                ),
+                (
+                    "glm",
+                    "Zhipu GLM",
+                    "",
+                    "https://open.bigmodel.cn/api/paas/v4",
+                    "glm-4,glm-4v",
+                ),
+                (
+                    "qwen",
+                    "Alibaba Qwen",
+                    "",
+                    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "qwen-max,qwen-plus,qwen-turbo",
+                ),
+                (
+                    "kimi",
+                    "Moonshot Kimi",
+                    "",
+                    "https://api.moonshot.cn/v1",
+                    "moonshot-v1-8k,moonshot-v1-32k,moonshot-v1-128k",
+                ),
+                (
+                    "ollama",
+                    "Ollama (本地)",
+                    "",
+                    "http://localhost:11434/v1",
+                    "llama3.1,qwen2.5,deepseek-r1",
+                ),
             ]
             for d in defaults:
                 self._add_provider_row(ProviderRowData(*d))
 
-    def _add_provider_row(self, data=None):
+    def _add_provider_row(self, data: ProviderRowData | None = None) -> None:
         row = self.provider_table.rowCount()
         self.provider_table.insertRow(row)
 
@@ -181,14 +242,14 @@ class SettingsPage(QWidget):
 
         self.provider_rows.append(row)
 
-    def _remove_provider_row(self):
+    def _remove_provider_row(self) -> None:
         rows = {item.row() for item in self.provider_table.selectedItems()}
         for row in sorted(rows, reverse=True):
             self.provider_table.removeRow(row)
             if row in self.provider_rows:
                 self.provider_rows.remove(row)
 
-    def _test_provider(self):
+    def _test_provider(self) -> None:
         row = self.provider_table.currentRow()
         if row < 0:
             QMessageBox.warning(self, "提示", "请先选择一行")
@@ -201,8 +262,7 @@ class SettingsPage(QWidget):
         if not name_item or not key_widget:
             return
 
-        name_item.text()
-        api_key = key_widget.text()
+        api_key = cast(QLineEdit, key_widget).text()
         base_url = url_item.text() if url_item else ""
 
         if not api_key:
@@ -211,17 +271,23 @@ class SettingsPage(QWidget):
 
         # 简单测试：发起 /models 请求
         import asyncio
-        async def test():
+
+        async def test() -> tuple[bool, str]:
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     headers = {"Authorization": f"Bearer {api_key}"}
-                    url = (base_url or "https://api.openai.com/v1").rstrip("/") + "/models"
+                    url = (base_url or "https://api.openai.com/v1").rstrip(
+                        "/"
+                    ) + "/models"
                     resp = await client.get(url, headers=headers)
                     if resp.status_code == 200:
-                        return True, f"连接成功，发现 {len(resp.json().get('data', []))} 个模型"
+                        return (
+                            True,
+                            f"连接成功，发现 {len(resp.json().get('data', []))} 个模型",
+                        )
                     else:
                         return False, f"HTTP {resp.status_code}: {resp.text}"
-            except Exception as e:
+            except httpx.HTTPError as e:
                 return False, str(e)
 
         # 简化：同步运行
@@ -233,10 +299,10 @@ class SettingsPage(QWidget):
                 QMessageBox.information(self, "测试结果", f"✅ {msg}")
             else:
                 QMessageBox.warning(self, "测试结果", f"❌ {msg}")
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             QMessageBox.critical(self, "错误", str(e))
 
-    def save_config(self):
+    def save_config(self) -> None:
         # 更新基础设置
         settings.gateway_host = self.host_edit.text() or "127.0.0.1"
         settings.gateway_port = self.port_spin.value()
@@ -249,7 +315,7 @@ class SettingsPage(QWidget):
         settings.prompt_enhancement_enabled = self.prompt_enabled.isChecked()
 
         # 收集 Provider
-        providers = []
+        providers_list: list[dict[str, Any]] = []
         for row in range(self.provider_table.rowCount()):
             name_item = self.provider_table.item(row, 0)
             display_item = self.provider_table.item(row, 1)
@@ -261,26 +327,30 @@ class SettingsPage(QWidget):
             if not name_item or not name_item.text().strip():
                 continue
 
-            providers.append({
-                "name": name_item.text().strip(),
-                "display_name": display_item.text().strip() if display_item else name_item.text().strip(),
-                "api_key": key_widget.text() if key_widget else "",
-                "base_url": url_item.text().strip() if url_item else "",
-                "models": [m.strip() for m in models_item.text().split(",")] if models_item and models_item.text() else [],
-                "enabled": enabled_widget.isChecked() if enabled_widget else True,
-                "priority": 0,
-            })
+            providers_list.append(
+                {
+                    "name": name_item.text().strip(),
+                    "display_name": (
+                        display_item.text().strip()
+                        if display_item
+                        else name_item.text().strip()
+                    ),
+                    "api_key": cast(QLineEdit, key_widget).text() if key_widget else "",
+                    "base_url": url_item.text().strip() if url_item else "",
+                    "models": (
+                        [m.strip() for m in models_item.text().split(",")]
+                        if models_item and models_item.text()
+                        else []
+                    ),
+                    "enabled": (
+                        cast(QCheckBox, enabled_widget).isChecked()
+                        if enabled_widget
+                        else True
+                    ),
+                    "priority": 0,
+                }
+            )
 
-        settings.set_providers(providers)
+        settings.set_providers([ProviderConfig(**p) for p in providers_list])
         self.config_saved.emit()
         QMessageBox.information(self, "成功", "配置已保存（运行时生效，重启后丢失）")
-
-
-class ProviderRowData:
-    def __init__(self, name, display_name, api_key, base_url, models):
-        self.name = name
-        self.display_name = display_name
-        self.api_key = api_key
-        self.base_url = base_url
-        self.models = models
-        self.enabled = True

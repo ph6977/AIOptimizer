@@ -1,6 +1,9 @@
 """数据库层"""
+
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
@@ -47,7 +50,7 @@ async def init_db() -> None:
 
 
 @asynccontextmanager
-async def get_db():
+async def get_db() -> AsyncIterator[aiosqlite.Connection]:
     if DB_PATH is None:
         await init_db()
     db_path_str = str(DB_PATH)
@@ -93,11 +96,12 @@ async def log_usage(
         await db.commit()
 
 
-async def get_usage_stats(days: int = 7) -> dict:
+async def get_usage_stats(days: int = 7) -> dict[str, Any]:
     """获取用量统计"""
     async with get_db() as db:
         # 总览
-        total = await db.execute_fetchall("""
+        total = await db.execute_fetchall(
+            """
             SELECT
                 COUNT(*) as requests,
                 SUM(total_tokens) as total_tokens,
@@ -105,10 +109,13 @@ async def get_usage_stats(days: int = 7) -> dict:
                 SUM(CASE WHEN compressed THEN saved_tokens ELSE 0 END) as saved_tokens
             FROM usage_logs
             WHERE timestamp >= datetime('now', ?)
-        """, (f"-{days} days",))
+        """,
+            (f"-{days} days",),
+        )
 
         # 按 Provider 分组
-        by_provider = await db.execute_fetchall("""
+        by_provider = await db.execute_fetchall(
+            """
             SELECT
                 provider,
                 COUNT(*) as requests,
@@ -117,10 +124,13 @@ async def get_usage_stats(days: int = 7) -> dict:
             FROM usage_logs
             WHERE timestamp >= datetime('now', ?)
             GROUP BY provider
-        """, (f"-{days} days",))
+        """,
+            (f"-{days} days",),
+        )
 
         # 按模型分组
-        by_model = await db.execute_fetchall("""
+        by_model = await db.execute_fetchall(
+            """
             SELECT
                 model,
                 COUNT(*) as requests,
@@ -129,10 +139,13 @@ async def get_usage_stats(days: int = 7) -> dict:
             FROM usage_logs
             WHERE timestamp >= datetime('now', ?)
             GROUP BY model
-        """, (f"-{days} days",))
+        """,
+            (f"-{days} days",),
+        )
 
         # 每日趋势
-        daily = await db.execute_fetchall("""
+        daily = await db.execute_fetchall(
+            """
             SELECT
                 date(timestamp) as day,
                 COUNT(*) as requests,
@@ -142,10 +155,13 @@ async def get_usage_stats(days: int = 7) -> dict:
             WHERE timestamp >= datetime('now', ?)
             GROUP BY date(timestamp)
             ORDER BY day
-        """, (f"-{days} days",))
+        """,
+            (f"-{days} days",),
+        )
 
+        total_list = list(total)
         return {
-            "summary": dict(total[0]) if total else {},
+            "summary": dict(total_list[0]) if total_list else {},
             "by_provider": [dict(r) for r in by_provider],
             "by_model": [dict(r) for r in by_model],
             "daily": [dict(r) for r in daily],

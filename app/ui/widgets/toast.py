@@ -1,16 +1,19 @@
 """Toast 通知管理器"""
+
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPaintEvent, QPen, QShowEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 
 class Toast(QWidget):
-    def __init__(self, message: str, duration: int = 3000, parent=None):
+    def __init__(
+        self, message: str, duration: int = 3000, parent: QWidget | None = None
+    ) -> None:
         super().__init__(parent)
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool |
-            Qt.WindowType.WindowStaysOnTopHint
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -46,14 +49,14 @@ class Toast(QWidget):
         self.timer.timeout.connect(self._start_fade_out)
         self.timer.start(duration)
 
-    def _start_fade_out(self):
+    def _start_fade_out(self) -> None:
         self.fade_out.start()
 
-    def showEvent(self, event):
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self.fade_in.start()
 
-    def paintEvent(self, event):
+    def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect().adjusted(1, 1, -1, -1)
@@ -63,26 +66,26 @@ class Toast(QWidget):
 
 
 class ToastManager:
-    def __init__(self, parent=None):
+    def __init__(self, parent: QWidget | None = None) -> None:
         self.parent = parent
-        self.toasts = []
+        self.toasts: list[Toast] = []
         self.spacing = 10
 
-    def show(self, message: str, duration: int = 3000):
+    def show(self, message: str, duration: int = 3000) -> None:
         toast = Toast(message, duration, self.parent)
         self.toasts.append(toast)
         self._reposition()
         toast.show()
 
         # 移除时清理列表
-        def on_finished():
+        def on_finished() -> None:
             if toast in self.toasts:
                 self.toasts.remove(toast)
             self._reposition()
 
         toast.fade_out.finished.connect(on_finished)
 
-    def _reposition(self):
+    def _reposition(self) -> None:
         if not self.parent:
             return
 

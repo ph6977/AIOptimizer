@@ -1,6 +1,7 @@
 """上下文压缩引擎 v1：两阶段（分类→压缩）"""
+
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, ClassVar, Literal
 
 import tiktoken
 
@@ -34,20 +35,63 @@ class Compressor:
     """
 
     # 关键信息判定关键词
-    KEEP_KEYWORDS = [
-        "代码", "函数", "类", "变量", "参数", "返回值", "错误", "异常", "bug",
-        "决定", "结论", "方案", "架构", "设计", "接口", "API", "数据库", "表",
-        "用户", "偏好", "习惯", "要求", "约束", "必须", "禁止", "注意",
-        "密码", "token", "key", "secret", "配置", "环境变量",
-        "文件", "路径", "目录", "行号", "版本", "提交", "分支",
+    KEEP_KEYWORDS: ClassVar[list[str]] = [
+        "代码",
+        "函数",
+        "类",
+        "变量",
+        "参数",
+        "返回值",
+        "错误",
+        "异常",
+        "bug",
+        "决定",
+        "结论",
+        "方案",
+        "架构",
+        "设计",
+        "接口",
+        "API",
+        "数据库",
+        "表",
+        "用户",
+        "偏好",
+        "习惯",
+        "要求",
+        "约束",
+        "必须",
+        "禁止",
+        "注意",
+        "密码",
+        "token",
+        "key",
+        "secret",
+        "配置",
+        "环境变量",
+        "文件",
+        "路径",
+        "目录",
+        "行号",
+        "版本",
+        "提交",
+        "分支",
     ]
 
-    DROP_KEYWORDS = [
-        "你好", "谢谢", "没问题", "好的", "明白", "理解", "收到",
-        "哈哈", "呵呵", "emoji", "表情",
+    DROP_KEYWORDS: ClassVar[list[str]] = [
+        "你好",
+        "谢谢",
+        "没问题",
+        "好的",
+        "明白",
+        "理解",
+        "收到",
+        "哈哈",
+        "呵呵",
+        "emoji",
+        "表情",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.encoding = tiktoken.get_encoding("cl100k_base")
         self._judge_cache: dict[str, CompressionDecision] = {}
 
@@ -75,7 +119,9 @@ class Compressor:
             return CompressionDecision("keep", "包含关键技术信息/代码")
 
         # 纯寒暄、确认类 -> drop
-        if len(message.content) < 50 and any(kw in content for kw in self.DROP_KEYWORDS):
+        if len(message.content) < 50 and any(
+            kw in content for kw in self.DROP_KEYWORDS
+        ):
             return CompressionDecision("drop", "纯寒暄/确认类")
 
         # 长文本且非关键 -> summarize
@@ -85,7 +131,9 @@ class Compressor:
         # 默认保留
         return CompressionDecision("keep", "默认保留")
 
-    async def _classify_by_llm(self, message: ChatMessage, context_hint: str = "") -> CompressionDecision:
+    async def _classify_by_llm(
+        self, message: ChatMessage, context_hint: str = ""
+    ) -> CompressionDecision:
         """LLM-judge 精细分类（带缓存）"""
         cache_key = f"{message.role}:{hash(message.content)}"
         if cache_key in self._judge_cache:
@@ -102,7 +150,7 @@ class Compressor:
         messages: list[ChatMessage],
         target_tokens: int | None = None,
         max_context_tokens: int | None = None,
-    ) -> tuple[list[ChatMessage], dict]:
+    ) -> tuple[list[ChatMessage], dict[str, Any]]:
         """
         压缩消息列表
 
@@ -141,8 +189,14 @@ class Compressor:
 
         # 保留最近 N 轮对话不压缩（默认保留最后 4 条非系统消息）
         keep_recent = 4
-        to_compress = other_messages[:-keep_recent] if len(other_messages) > keep_recent else []
-        recent_messages = other_messages[-keep_recent:] if len(other_messages) > keep_recent else other_messages
+        to_compress = (
+            other_messages[:-keep_recent] if len(other_messages) > keep_recent else []
+        )
+        recent_messages = (
+            other_messages[-keep_recent:]
+            if len(other_messages) > keep_recent
+            else other_messages
+        )
 
         if not to_compress:
             return messages, {
@@ -163,8 +217,14 @@ class Compressor:
             decisions.append(MessageWithDecision(msg, decision, tokens))
 
         # 预算分配：先计算必须保留的 tokens
-        system_tokens = sum(self.count_tokens(m.content) + self.count_tokens(m.role) for m in system_messages)
-        recent_tokens = sum(self.count_tokens(m.content) + self.count_tokens(m.role) for m in recent_messages)
+        system_tokens = sum(
+            self.count_tokens(m.content) + self.count_tokens(m.role)
+            for m in system_messages
+        )
+        recent_tokens = sum(
+            self.count_tokens(m.content) + self.count_tokens(m.role)
+            for m in recent_messages
+        )
         budget = target - system_tokens - recent_tokens
 
         if budget <= 0:
@@ -196,7 +256,11 @@ class Compressor:
                     summarized_content.append(mw.decision.summary)
                 else:
                     # 简单摘要：取前 200 字符
-                    summary = mw.original.content[:200] + "..." if len(mw.original.content) > 200 else mw.original.content
+                    summary = (
+                        mw.original.content[:200] + "..."
+                        if len(mw.original.content) > 200
+                        else mw.original.content
+                    )
                     summarized_content.append(f"[摘要] {mw.original.role}: {summary}")
                 budget -= mw.tokens // 3  # 摘要大约节省 2/3
             else:
@@ -206,7 +270,9 @@ class Compressor:
         summary_msgs = []
         if summarized_content:
             summary_text = "\n".join(summarized_content)
-            summary_msgs.append(ChatMessage(role="system", content=f"[历史对话摘要]\n{summary_text}"))
+            summary_msgs.append(
+                ChatMessage(role="system", content=f"[历史对话摘要]\n{summary_text}")
+            )
 
         # 组装最终消息：系统 + 摘要 + 保留的旧消息 + 最近消息
         compressed = system_messages + summary_msgs + kept_msgs + recent_messages
@@ -216,12 +282,21 @@ class Compressor:
             "original_tokens": original_tokens,
             "compressed_tokens": compressed_tokens,
             "saved_tokens": original_tokens - compressed_tokens,
-            "saved_ratio": (original_tokens - compressed_tokens) / original_tokens if original_tokens > 0 else 0,
+            "saved_ratio": (
+                (original_tokens - compressed_tokens) / original_tokens
+                if original_tokens > 0
+                else 0
+            ),
             "kept": len(system_messages) + len(kept_msgs) + len(recent_messages),
             "summarized": len(summarized_content),
             "dropped": dropped_count,
             "details": [
-                {"role": mw.original.role, "action": mw.decision.action, "reason": mw.decision.reason, "tokens": mw.tokens}
+                {
+                    "role": mw.original.role,
+                    "action": mw.decision.action,
+                    "reason": mw.decision.reason,
+                    "tokens": mw.tokens,
+                }
                 for mw in decisions
             ],
         }

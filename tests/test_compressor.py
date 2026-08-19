@@ -1,4 +1,5 @@
 """压缩引擎单测"""
+
 import pytest
 
 from app.optimizer.compressor import compressor
@@ -52,8 +53,12 @@ class TestCompressor:
         # 构造长对话
         msgs = [ChatMessage(role="system", content="System prompt")]
         for i in range(20):
-            msgs.append(ChatMessage(role="user" if i % 2 == 0 else "assistant",
-                                     content=f"这是第 {i} 轮对话，包含一些普通文本内容。" * 5))
+            msgs.append(
+                ChatMessage(
+                    role="user" if i % 2 == 0 else "assistant",
+                    content=f"这是第 {i} 轮对话，包含一些普通文本内容。" * 5,
+                )
+            )
         compressed, stats = await compressor.compress(msgs, target_tokens=500)
         assert stats["saved_tokens"] > 0
         assert stats["saved_ratio"] > 0
@@ -65,7 +70,7 @@ class TestCompressor:
         for i in range(10):
             msgs.append(ChatMessage(role="user", content=f"User {i}"))
             msgs.append(ChatMessage(role="assistant", content=f"Assistant {i}"))
-        compressed, _stats = await compressor.compress(msgs, target_tokens=300)
+        compressed, _ = await compressor.compress(msgs, target_tokens=300)
         # 系统消息必须保留
         assert any(m.role == "system" and "Important" in m.content for m in compressed)
         # 最近几轮必须保留

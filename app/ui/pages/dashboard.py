@@ -1,4 +1,7 @@
 """用量面板页面"""
+
+from typing import Any
+
 import httpx
 from PySide6.QtCharts import (
     QBarCategoryAxis,
@@ -17,6 +20,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -27,33 +31,37 @@ from app.core.config import settings
 
 class StatsWorker(QThread):
     """后台获取统计数据"""
+
     finished = Signal(dict)
     error = Signal(str)
 
-    def __init__(self, days: int):
+    def __init__(self, days: int) -> None:
         super().__init__()
         self.days = days
 
-    def run(self):
+    def run(self) -> None:
         try:
-            url = f"http://{settings.gateway_host}:{settings.gateway_port}/v1/usage/stats"
+            url = (
+                f"http://{settings.gateway_host}:{settings.gateway_port}/v1/usage/stats"
+            )
             resp = httpx.get(url, params={"days": self.days}, timeout=5.0)
             if resp.status_code == 200:
                 self.finished.emit(resp.json())
             else:
                 self.error.emit(f"HTTP {resp.status_code}")
-        except Exception as e:
+        except httpx.HTTPError as e:
             self.error.emit(str(e))
 
 
 class DashboardPage(QWidget):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.worker = None
+        self.worker: StatsWorker | None = None
+        self.cards: dict[str, QWidget] = {}
         self._init_ui()
         self.refresh()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         # 顶部控制栏
@@ -73,7 +81,6 @@ class DashboardPage(QWidget):
         # 概览卡片
         overview_group = QGroupBox("概览")
         overview_layout = QGridLayout(overview_group)
-        self.cards = {}
         card_items = [
             ("总请求数", "requests", "0"),
             ("总 Token", "total_tokens", "0"),
@@ -144,7 +151,7 @@ class DashboardPage(QWidget):
         view.setMinimumHeight(250)
         return view
 
-    def refresh(self):
+    def refresh(self) -> None:
         days = 7
         text = self.period_combo.currentText()
         if "30" in text:
@@ -161,22 +168,27 @@ class DashboardPage(QWidget):
         self.worker.finished.connect(lambda _: self._reset_refresh_btn())
         self.worker.start()
 
-    def _reset_refresh_btn(self):
+    def _reset_refresh_btn(self) -> None:
         self.refresh_btn.setEnabled(True)
         self.refresh_btn.setText("🔄 刷新")
 
-    def _on_stats_ready(self, data: dict):
+    def _set_card_value(self, key: str, text: str) -> None:
+        label = self.cards[key].findChild(QLabel, "value")
+        if label is not None:
+            label.setText(text)
+
+    def _on_stats_ready(self, data: dict[str, Any]) -> None:
         # 更新概览卡片
         summary = data.get("summary", {})
-        self.cards["requests"].findChild(QLabel, "value").setText(str(summary.get("requests", 0)))
-        self.cards["total_tokens"].findChild(QLabel, "value").setText(f"{summary.get('total_tokens', 0):,}")
-        self.cards["total_cost"].findChild(QLabel, "value").setText(f"{summary.get('total_cost', 0):.4f}")
-        self.cards["saved_tokens"].findChild(QLabel, "value").setText(f"{summary.get('saved_tokens', 0):,}")
+        self._set_card_value("requests", str(summary.get("requests", 0)))
+        self._set_card_value("total_tokens", f"{summary.get('total_tokens', 0):,}")
+        self._set_card_value("total_cost", f"{summary.get('total_cost', 0):.4f}")
+        self._set_card_value("saved_tokens", f"{summary.get('saved_tokens', 0):,}")
 
         total = summary.get("total_tokens", 0)
         saved = summary.get("saved_tokens", 0)
         ratio = (saved / total * 100) if total > 0 else 0
-        self.cards["saved_ratio"].findChild(QLabel, "value").setText(f"{ratio:.1f}%")
+        self._set_card_value("saved_ratio", f"{ratio:.1f}%")
 
         # 更新每日趋势图
         self._update_line_chart(data.get("daily", []))
@@ -187,15 +199,18 @@ class DashboardPage(QWidget):
         # 更新模型分布
         by_model = data.get("by_model", [])
         if by_model:
-            lines = [f"{m['model']}: {m['requests']}次, {m['tokens']:,} tokens, ${m['cost']:.4f}" for m in by_model[:10]]
+            lines = [
+                f"{m['model']}: {m['requests']}次, {m['tokens']:,} tokens, ${m['cost']:.4f}"
+                for m in by_model[:10]
+            ]
             self.model_label.setText("\n".join(lines))
         else:
             self.model_label.setText("暂无数据")
 
-    def _on_stats_error(self, err: str):
-        self.statusBar().showMessage(f"获取统计失败: {err}")
+    def _on_stats_error(self, err: str) -> None:
+        QMessageBox.warning(self, "统计失败", f"获取统计失败: {err}")
 
-    def _update_line_chart(self, daily: list):
+    def _update_line_chart(self, daily: list[dict[str, Any]]) -> None:
         chart = self.daily_chart.chart()
         chart.removeAllSeries()
 
@@ -214,7 +229,7 @@ class DashboardPage(QWidget):
         series.attachAxis(axis_x)
         series.attachAxis(axis_y)
 
-    def _update_bar_chart(self, by_provider: list):
+    def _update_bar_chart(self, by_provider: list[dict[str, Any]]) -> None:
         chart = self.provider_chart.chart()
         chart.removeAllSeries()
 

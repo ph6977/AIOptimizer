@@ -1,4 +1,7 @@
 """压缩透明页：展示每条压缩决策的详情，可展开/恢复"""
+
+from typing import Any
+
 import httpx
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
@@ -23,29 +26,33 @@ class TransparencyWorker(QThread):
     finished = Signal(list)
     error = Signal(str)
 
-    def __init__(self, limit: int = 50):
+    def __init__(self, limit: int = 50) -> None:
         super().__init__()
         self.limit = limit
 
-    def run(self):
+    def run(self) -> None:
         try:
-            url = f"http://{settings.gateway_host}:{settings.gateway_port}/v1/usage/stats"
+            url = (
+                f"http://{settings.gateway_host}:{settings.gateway_port}/v1/usage/stats"
+            )
             resp = httpx.get(url, params={"days": 1}, timeout=10.0)
             if resp.status_code == 200:
                 # 简化：返回空，实际需要专门的压缩详情 API
                 self.finished.emit([])
             else:
                 self.error.emit(f"HTTP {resp.status_code}")
-        except Exception as e:
+        except httpx.HTTPError as e:
             self.error.emit(str(e))
 
 
 class TransparencyPage(QWidget):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
+        self.current_items: list[QTreeWidgetItem] = []
+        self.current_data: Any = None
         self._init_ui()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         # 顶部控制栏
@@ -81,8 +88,12 @@ class TransparencyPage(QWidget):
         left_layout.addWidget(self.tree)
 
         # 统计摘要
-        self.summary_label = QLabel("总计: 0 条, 保留: 0, 摘要: 0, 丢弃: 0, 节省: 0 tokens")
-        self.summary_label.setStyleSheet("color: #666; padding: 8px; background: #f5f5f5; border-radius: 4px;")
+        self.summary_label = QLabel(
+            "总计: 0 条, 保留: 0, 摘要: 0, 丢弃: 0, 节省: 0 tokens"
+        )
+        self.summary_label.setStyleSheet(
+            "color: #666; padding: 8px; background: #f5f5f5; border-radius: 4px;"
+        )
         left_layout.addWidget(self.summary_label)
 
         splitter.addWidget(left_widget)
@@ -127,32 +138,58 @@ class TransparencyPage(QWidget):
         hint.setStyleSheet("color: #666; padding: 8px;")
         layout.addWidget(hint)
 
-        self.current_items = []
-
-    def refresh(self):
+    def refresh(self) -> None:
         self.worker = TransparencyWorker()
         self.worker.finished.connect(self._on_data_ready)
         self.worker.error.connect(self._on_error)
         self.worker.start()
 
-    def _on_data_ready(self, data: list):
+    def _on_data_ready(self, data: list[Any]) -> None:
         # 这里简化：生成演示数据
         self._load_demo_data()
 
-    def _on_error(self, err: str):
+    def _on_error(self, err: str) -> None:
         QMessageBox.warning(self, "错误", f"获取失败: {err}")
 
-    def _load_demo_data(self):
+    def _load_demo_data(self) -> None:
         """加载演示数据（实际应从 API 获取压缩详情）"""
         self.tree.clear()
         self.current_items = []
 
         demo_decisions = [
             ("system", "keep", "系统提示词", 156, 0, "You are a helpful assistant..."),
-            ("user", "keep", "包含代码关键词", 89, 0, "请帮我写一个 Python 函数计算斐波那契数列"),
-            ("assistant", "keep", "包含代码", 234, 0, "def fib(n):\n    if n <= 1: return n\n    return fib(n-1) + fib(n-2)"),
-            ("user", "summarize", "长文本非关键", 567, 423, "这是一段很长的对话内容，主要讨论了项目架构、技术选型、团队分工等非核心技术细节..."),
-            ("assistant", "summarize", "长文本非关键", 445, 312, "建议采用微服务架构，使用 Docker 容器化部署，CI/CD 流水线..."),
+            (
+                "user",
+                "keep",
+                "包含代码关键词",
+                89,
+                0,
+                "请帮我写一个 Python 函数计算斐波那契数列",
+            ),
+            (
+                "assistant",
+                "keep",
+                "包含代码",
+                234,
+                0,
+                "def fib(n):\n    if n <= 1: return n\n    return fib(n-1) + fib(n-2)",
+            ),
+            (
+                "user",
+                "summarize",
+                "长文本非关键",
+                567,
+                423,
+                "这是一段很长的对话内容，主要讨论了项目架构、技术选型、团队分工等非核心技术细节...",
+            ),
+            (
+                "assistant",
+                "summarize",
+                "长文本非关键",
+                445,
+                312,
+                "建议采用微服务架构，使用 Docker 容器化部署，CI/CD 流水线...",
+            ),
             ("user", "drop", "纯寒暄", 12, 12, "好的，谢谢！"),
             ("assistant", "drop", "纯确认", 8, 8, "不客气！"),
         ]
@@ -160,22 +197,30 @@ class TransparencyPage(QWidget):
         kept = summarized = dropped = saved_total = 0
 
         for role, action, reason, tokens, saved, content in demo_decisions:
-            item = QTreeWidgetItem([
-                f"[{role}] {content[:60]}{'...' if len(content) > 60 else ''}",
-                action.upper(),
-                reason,
-                str(tokens),
-                f"+{saved}" if saved else "0",
-            ])
-            item.setData(0, Qt.ItemDataRole.UserRole, {
-                "role": role,
-                "action": action,
-                "reason": reason,
-                "tokens": tokens,
-                "saved": saved,
-                "original": content,
-                "summary": f"[摘要] {content[:200]}..." if action == "summarize" else None,
-            })
+            item = QTreeWidgetItem(
+                [
+                    f"[{role}] {content[:60]}{'...' if len(content) > 60 else ''}",
+                    action.upper(),
+                    reason,
+                    str(tokens),
+                    f"+{saved}" if saved else "0",
+                ]
+            )
+            item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {
+                    "role": role,
+                    "action": action,
+                    "reason": reason,
+                    "tokens": tokens,
+                    "saved": saved,
+                    "original": content,
+                    "summary": (
+                        f"[摘要] {content[:200]}..." if action == "summarize" else None
+                    ),
+                },
+            )
             self.tree.addTopLevelItem(item)
             self.current_items.append(item)
 
@@ -193,7 +238,10 @@ class TransparencyPage(QWidget):
 
         # 颜色标记
         for i in range(self.tree.topLevelItemCount()):
-            item = self.tree.topLevelItem(i)
+            item_opt = self.tree.topLevelItem(i)
+            if item_opt is None:
+                continue
+            item = item_opt
             action = item.text(1)
             if action == "KEEP":
                 item.setBackground(1, Qt.GlobalColor.green)
@@ -202,7 +250,7 @@ class TransparencyPage(QWidget):
             elif action == "DROP":
                 item.setBackground(1, Qt.GlobalColor.red)
 
-    def _on_item_clicked(self, item: QTreeWidgetItem, column: int):
+    def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if not data:
             return
@@ -225,17 +273,18 @@ Token: {data['tokens']}
 
         self.detail_text.setPlainText(detail)
 
-    def _restore_original(self):
-        if hasattr(self, 'current_data') and self.current_data.get("summary"):
+    def _restore_original(self) -> None:
+        if hasattr(self, "current_data") and self.current_data.get("summary"):
             self.detail_text.setPlainText(self.current_data["original"])
             self.restore_btn.setEnabled(False)
 
-    def _copy_detail(self):
+    def _copy_detail(self) -> None:
         from PySide6.QtWidgets import QApplication
+
         QApplication.clipboard().setText(self.detail_text.toPlainText())
         QMessageBox.information(self, "已复制", "详情已复制到剪贴板")
 
-    def _clear(self):
+    def _clear(self) -> None:
         self.tree.clear()
         self.detail_text.clear()
         self.summary_label.setText("已清空")

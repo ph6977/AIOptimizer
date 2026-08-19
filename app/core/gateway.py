@@ -1,14 +1,17 @@
 """FastAPI 网关：OpenAI 兼容代理 + 优化管线"""
-import time
+
+import json
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.core.config import settings
+from app.core.config import ProviderConfig, settings
 from app.core.db import init_db, log_usage
 from app.optimizer.compressor import compressor
 from app.optimizer.prompt_enhancer import prompt_enhancer
@@ -17,7 +20,7 @@ from app.providers import ChatCompletionRequest, ChatMessage, ProviderFactory
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await init_db()
     yield
     await ProviderFactory.close_all()
@@ -38,7 +41,7 @@ app.add_middleware(
 )
 
 
-def parse_chat_request(data: dict) -> ChatCompletionRequest:
+def parse_chat_request(data: dict[str, Any]) -> ChatCompletionRequest:
     """解析请求为内部格式"""
     messages = [
         ChatMessage(role=m["role"], content=m.get("content", ""), name=m.get("name"))
@@ -50,22 +53,26 @@ def parse_chat_request(data: dict) -> ChatCompletionRequest:
         temperature=data.get("temperature", 0.7),
         max_tokens=data.get("max_tokens"),
         stream=data.get("stream", False),
-        extra={k: v for k, v in data.items() if k not in ("model", "messages", "temperature", "max_tokens", "stream")},
+        extra={
+            k: v
+            for k, v in data.items()
+            if k not in ("model", "messages", "temperature", "max_tokens", "stream")
+        },
     )
 
 
-def build_provider_configs() -> list:
+def build_provider_configs() -> list[ProviderConfig]:
     """从设置构建 Provider 配置列表"""
     return settings.get_providers()
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict[str, str]:
     return {"status": "ok", "version": "0.1.0"}
 
 
 @app.get("/v1/models")
-async def list_models():
+async def list_models() -> dict[str, Any]:
     """聚合所有 Provider 的模型列表"""
     providers = build_provider_configs()
     all_models = []
@@ -76,29 +83,30 @@ async def list_models():
             adapter = ProviderFactory.create(p)
             models = await adapter.list_models()
             for m in models:
-                all_models.append({
-                    "id": f"{p.name}/{m.id}",
-                    "object": "model",
-                    "owned_by": p.name,
-                    "provider": p.name,
-                    "display_name": m.display_name,
-                    "context_window": m.context_window,
-                })
-        except Exception:
+                all_models.append(
+                    {
+                        "id": f"{p.name}/{m.id}",
+                        "object": "model",
+                        "owned_by": p.name,
+                        "provider": p.name,
+                        "display_name": m.display_name,
+                        "context_window": m.context_window,
+                    }
+                )
+        except httpx.HTTPError:
             continue
     return {"object": "list", "data": all_models}
 
 
 @app.post("/v1/chat/completions")
-async def chat_completions(request: Request):
+async def chat_completions(request: Request) -> Response:
     """核心代理端点：压缩 → 路由 → 增强 → 转发"""
-    time.time()
     request_id = str(uuid.uuid4())[:8]
     session_id = request.headers.get("x-session-id", "default")
 
     try:
         body = await request.json()
-    except Exception:
+    except (json.JSONDecodeError, ValueError):
         raise HTTPException(400, "Invalid JSON")
 
     # 解析请求
@@ -128,11 +136,19 @@ async def chat_completions(request: Request):
         selected_provider_name = routing_decision.provider
     else:
         # 使用指定模型或第一个可用
-        selected_provider_name = original_model.split("/")[0] if "/" in original_model else providers[0].name
-        chat_request.model = original_model.split("/")[-1] if "/" in original_model else providers[0].models[0]
+        selected_provider_name = (
+            original_model.split("/")[0] if "/" in original_model else providers[0].name
+        )
+        chat_request.model = (
+            original_model.split("/")[-1]
+            if "/" in original_model
+            else providers[0].models[0]
+        )
 
     # 找到选中的 Provider 配置
-    provider_config = next((p for p in providers if p.name == selected_provider_name), None)
+    provider_config = next(
+        (p for p in providers if p.name == selected_provider_name), None
+    )
     if not provider_config or not provider_config.api_key:
         raise HTTPException(503, f"Provider {selected_provider_name} not available")
 
@@ -144,15 +160,19 @@ async def chat_completions(request: Request):
     adapter = ProviderFactory.create(provider_config)
 
     # 记录原始 token 数（用于计算节省量）
-    original_tokens = sum(
-        compressor.count_tokens(m.content) + compressor.count_tokens(m.role)
-        for m in chat_request.messages
-    ) if "original_tokens" not in compression_stats else compression_stats.get("original_tokens", 0)
+    original_tokens = (
+        sum(
+            compressor.count_tokens(m.content) + compressor.count_tokens(m.role)
+            for m in chat_request.messages
+        )
+        if "original_tokens" not in compression_stats
+        else compression_stats.get("original_tokens", 0)
+    )
 
     try:
         if chat_request.stream:
             # 流式响应
-            async def stream_generator():
+            async def stream_generator() -> AsyncIterator[str]:
                 total_response_tokens = 0
                 async for chunk in adapter.chat_completion_stream(chat_request):
                     # 简单统计响应 token（粗略）
@@ -180,7 +200,9 @@ async def chat_completions(request: Request):
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
                     "X-Request-ID": request_id,
-                    "X-Compression": "enabled" if compression_stats.get("enabled") else "disabled",
+                    "X-Compression": (
+                        "enabled" if compression_stats.get("enabled") else "disabled"
+                    ),
                 },
             )
         else:
@@ -205,41 +227,54 @@ async def chat_completions(request: Request):
             response_dict = response.__dict__.copy()
             response_dict["optimization"] = {
                 "compression": compression_stats,
-                "routing": {
-                    "provider": selected_provider_name,
-                    "model": chat_request.model,
-                    "reason": routing_decision.reason if routing_decision else "manual",
-                } if routing_decision else None,
+                "routing": (
+                    {
+                        "provider": selected_provider_name,
+                        "model": chat_request.model,
+                        "reason": (
+                            routing_decision.reason if routing_decision else "manual"
+                        ),
+                    }
+                    if routing_decision
+                    else None
+                ),
             }
             return JSONResponse(response_dict, headers={"X-Request-ID": request_id})
 
     except httpx.HTTPStatusError as e:
-        raise HTTPException(e.response.status_code, f"Upstream error: {e.response.text}")
+        raise HTTPException(
+            e.response.status_code, f"Upstream error: {e.response.text}"
+        ) from e
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"Upstream unreachable: {e!s}") from e
     except Exception as e:
-        raise HTTPException(500, f"Gateway error: {e!s}")
+        raise HTTPException(500, f"Gateway error: {e!s}") from e
 
 
 @app.get("/v1/usage/stats")
-async def usage_stats(days: int = 7):
+async def usage_stats(days: int = 7) -> dict[str, Any]:
     """用量统计 API（供 GUI 调用）"""
     from app.core.db import get_usage_stats
+
     return await get_usage_stats(days)
 
 
 @app.get("/v1/config")
-async def get_config():
+async def get_config() -> dict[str, Any]:
     """获取当前配置（脱敏）"""
     providers = settings.get_providers()
     safe_providers = []
     for p in providers:
-        safe_providers.append({
-            "name": p.name,
-            "display_name": p.display_name,
-            "enabled": p.enabled,
-            "models": p.models,
-            "has_key": bool(p.api_key),
-            "priority": p.priority,
-        })
+        safe_providers.append(
+            {
+                "name": p.name,
+                "display_name": p.display_name,
+                "enabled": p.enabled,
+                "models": p.models,
+                "has_key": bool(p.api_key),
+                "priority": p.priority,
+            }
+        )
     return {
         "gateway": {"host": settings.gateway_host, "port": settings.gateway_port},
         "compression": {
@@ -248,14 +283,17 @@ async def get_config():
             "max_context": settings.max_context_tokens,
             "target_context": settings.target_context_tokens,
         },
-        "routing": {"enabled": settings.routing_enabled, "quality_vs_cost": settings.quality_vs_cost},
+        "routing": {
+            "enabled": settings.routing_enabled,
+            "quality_vs_cost": settings.quality_vs_cost,
+        },
         "prompt_enhancement": {"enabled": settings.prompt_enhancement_enabled},
         "providers": safe_providers,
     }
 
 
 @app.post("/v1/config")
-async def update_config(config: dict):
+async def update_config(config: dict[str, Any]) -> dict[str, str]:
     """更新配置（运行时生效，不持久化）"""
     for key, value in config.items():
         if hasattr(settings, key):

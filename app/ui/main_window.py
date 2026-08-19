@@ -1,7 +1,16 @@
 """主窗口"""
+
+from typing import Any
+
 from PySide6.QtCore import QTimer
-from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QSystemTrayIcon, QTabWidget
+from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QMenu,
+    QSystemTrayIcon,
+    QTabWidget,
+)
 
 from app.core.config import settings
 from app.ui.pages.dashboard import DashboardPage
@@ -12,7 +21,7 @@ from app.ui.widgets.toast import ToastManager
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("AIOptimizer - AI 优化网关")
         self.resize(1000, 700)
@@ -34,7 +43,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_page, "⚙️ 设置")
 
         # 状态栏
-        self.statusBar().showMessage(f"网关: http://{settings.gateway_host}:{settings.gateway_port} | 就绪")
+        self.statusBar().showMessage(
+            f"网关: http://{settings.gateway_host}:{settings.gateway_port} | 就绪"
+        )
 
         # 系统托盘
         self._init_tray()
@@ -44,7 +55,7 @@ class MainWindow(QMainWindow):
         self.refresh_timer.timeout.connect(self._refresh_dashboard)
         self.refresh_timer.start(5000)  # 5 秒刷新一次
 
-    def _init_tray(self):
+    def _init_tray(self) -> None:
         self.tray = QSystemTrayIcon(self)
         self.tray.setToolTip("AIOptimizer - AI 优化网关")
 
@@ -76,30 +87,29 @@ class MainWindow(QMainWindow):
         self.tray.activated.connect(self._tray_activated)
         self.tray.show()
 
-    def _tray_activated(self, reason):
+    def _tray_activated(self, reason: Any) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.showNormal()
             self.activateWindow()
 
-    def _copy_gateway_url(self):
-        from PySide6.QtWidgets import QApplication
+    def _copy_gateway_url(self) -> None:
         url = f"http://{settings.gateway_host}:{settings.gateway_port}"
         QApplication.clipboard().setText(url)
         self.toast.show(f"已复制: {url}", 2000)
 
-    def _toggle_compression(self, checked: bool):
+    def _toggle_compression(self, checked: bool) -> None:
         settings.compression_enabled = checked
         self.toggle_compress_action.setText("关闭压缩" if checked else "开启压缩")
         self.toast.show(f"压缩已{'开启' if checked else '关闭'}", 2000)
 
-    def _refresh_dashboard(self):
+    def _refresh_dashboard(self) -> None:
         self.dashboard.refresh()
 
-    def _quit_app(self):
+    def _quit_app(self) -> None:
         self.tray.hide()
         QApplication.quit()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:
         # 关闭窗口时最小化到托盘
         if self.tray.isVisible():
             self.hide()

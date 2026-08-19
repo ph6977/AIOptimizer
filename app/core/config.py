@@ -1,4 +1,5 @@
 """配置管理"""
+
 import os
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ProviderConfig(BaseSettings):
     """单个 Provider 的配置"""
+
     name: str
     display_name: str
     api_key: str = ""
@@ -21,6 +23,7 @@ class ProviderConfig(BaseSettings):
 
 class Settings(BaseSettings):
     """全局设置"""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -54,15 +57,19 @@ class Settings(BaseSettings):
 
     def get_providers(self) -> list[ProviderConfig]:
         import json
+
         try:
             data = json.loads(self.providers_json)
             return [ProviderConfig(**p) for p in data]
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return []
 
     def set_providers(self, providers: list[ProviderConfig]) -> None:
         import json
-        self.providers_json = json.dumps([p.model_dump() for p in providers], ensure_ascii=False)
+
+        self.providers_json = json.dumps(
+            [p.model_dump() for p in providers], ensure_ascii=False
+        )
 
     def get_data_dir(self) -> Path:
         """获取数据目录"""

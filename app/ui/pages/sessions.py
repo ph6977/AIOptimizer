@@ -1,4 +1,6 @@
 """会话管理页面"""
+
+
 import json
 
 import httpx
@@ -9,6 +11,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QVBoxLayout,
@@ -22,30 +25,32 @@ class SessionsWorker(QThread):
     finished = Signal(list)
     error = Signal(str)
 
-    def __init__(self, days: int, limit: int):
+    def __init__(self, days: int, limit: int) -> None:
         super().__init__()
         self.days = days
         self.limit = limit
 
-    def run(self):
+    def run(self) -> None:
         try:
-            url = f"http://{settings.gateway_host}:{settings.gateway_port}/v1/usage/stats"
+            url = (
+                f"http://{settings.gateway_host}:{settings.gateway_port}/v1/usage/stats"
+            )
             resp = httpx.get(url, params={"days": self.days}, timeout=10.0)
             if resp.status_code == 200:
                 # 这里简化：实际应有专门的会话查询 API
                 self.finished.emit([])
             else:
                 self.error.emit(f"HTTP {resp.status_code}")
-        except Exception as e:
+        except httpx.HTTPError as e:
             self.error.emit(str(e))
 
 
 class SessionsPage(QWidget):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._init_ui()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         # 顶部控制栏
@@ -66,10 +71,12 @@ class SessionsPage(QWidget):
         # 会话表格
         self.table = QTableWidget()
         self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels([
-            "时间", "Provider", "模型", "请求数", "总 Tokens", "成本", "节省率"
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setHorizontalHeaderLabels(
+            ["时间", "Provider", "模型", "请求数", "总 Tokens", "成本", "节省率"]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         layout.addWidget(self.table)
@@ -96,10 +103,9 @@ class SessionsPage(QWidget):
         placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(placeholder)
 
-    def _export_sessions(self):
+    def _export_sessions(self) -> None:
         rows = {item.row() for item in self.table.selectedItems()}
         if not rows:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "提示", "请先选择要导出的行")
             return
 
@@ -115,7 +121,8 @@ class SessionsPage(QWidget):
             row_data = {}
             for col in range(self.table.columnCount()):
                 item = self.table.item(row, col)
-                header = self.table.horizontalHeaderItem(col).text()
+                header_item = self.table.horizontalHeaderItem(col)
+                header = header_item.text() if header_item else ""
                 row_data[header] = item.text() if item else ""
             data.append(row_data)
 
@@ -130,8 +137,6 @@ class SessionsPage(QWidget):
             else:
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.information(self, "成功", f"已导出 {len(data)} 条记录到 {path}")
-        except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
+        except OSError as e:
             QMessageBox.critical(self, "错误", str(e))
