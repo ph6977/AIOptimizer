@@ -1,0 +1,11 @@
+# Dev tools
+ruff>=0.5.0
+black>=24.3.0
+mypy>=1.10.0
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+pytest-mock>=3.14.0
+pre-commit>=3.7.0
+
+# Build
+pyinstaller>=6.5.0

@@ -1,0 +1,45 @@
+# AIOptimizer
+# AI 优化桌面应用 - 本地网关 + 压缩/路由/增强 + GUI
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build
+dist/
+build/
+*.spec
+*.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.db
+*.sqlite
+*.sqlite3
+eval_reports/
+*.log
+.env
+.env.local
+
+# Data
+data/
+%APPDATA%\AIOptimizer/
+%LOCALAPPDATA%\AIOptimizer/
