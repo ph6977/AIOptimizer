@@ -1,11 +1,11 @@
 """上下文压缩引擎 v1：两阶段（分类→压缩）"""
-import json
-import tiktoken
-from typing import Literal
 from dataclasses import dataclass
-from app.providers import ProviderFactory, ChatMessage, ChatCompletionRequest
-from app.core.config import settings
+from typing import Literal
 
+import tiktoken
+
+from app.core.config import settings
+from app.providers import ChatMessage
 
 CompressionAction = Literal["keep", "summarize", "drop"]
 
@@ -119,7 +119,6 @@ class Compressor:
             }
         """
         target = target_tokens or settings.target_context_tokens
-        max_ctx = max_context_tokens or settings.max_context_tokens
 
         if not settings.compression_enabled:
             return messages, {"enabled": False}

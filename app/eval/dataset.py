@@ -2,7 +2,6 @@
 from dataclasses import dataclass
 from typing import Literal
 
-
 TaskType = Literal["chat", "code", "reasoning", "vision", "creative", "analysis"]
 
 

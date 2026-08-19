@@ -1,9 +1,9 @@
 """智能模型路由"""
 from dataclasses import dataclass
 from typing import Literal
-from app.providers import ProviderFactory, ModelInfo, ChatCompletionRequest
-from app.core.config import settings
 
+from app.core.config import settings
+from app.providers import ChatCompletionRequest, ModelInfo, ProviderFactory
 
 TaskType = Literal["chat", "code", "reasoning", "vision", "creative", "analysis"]
 
@@ -169,7 +169,7 @@ class Router:
             )
 
         # 兜底
-        p, m, mi = candidates[0]
+        p, m, _mi = candidates[0]
         return RoutingDecision(p, m, "兜底选择", 0.3)
 
 

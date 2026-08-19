@@ -1,12 +1,20 @@
 """压缩透明页：展示每条压缩决策的详情，可展开/恢复"""
 import httpx
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTreeWidget, QTreeWidgetItem, QSplitter, QTextEdit,
-    QGroupBox, QComboBox, QMessageBox
-)
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTextEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.core.config import settings
 
@@ -132,7 +140,6 @@ class TransparencyPage(QWidget):
         self._load_demo_data()
 
     def _on_error(self, err: str):
-        from PySide6.QtWidgets import QMessageBox
         QMessageBox.warning(self, "错误", f"获取失败: {err}")
 
     def _load_demo_data(self):
@@ -226,7 +233,6 @@ Token: {data['tokens']}
     def _copy_detail(self):
         from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(self.detail_text.toPlainText())
-        from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(self, "已复制", "详情已复制到剪贴板")
 
     def _clear(self):

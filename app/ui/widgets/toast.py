@@ -1,7 +1,7 @@
 """Toast 通知管理器"""
-from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QHBoxLayout
-from PySide6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect
-from PySide6.QtGui import QColor, QPainter, QBrush, QPen
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 
 class Toast(QWidget):

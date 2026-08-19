@@ -1,15 +1,12 @@
 """主窗口"""
-from PySide6.QtWidgets import (
-    QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QSystemTrayIcon, QMenu, QMessageBox
-)
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QIcon, QAction, QDesktopServices
+from PySide6.QtCore import QTimer
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QSystemTrayIcon, QTabWidget
 
 from app.core.config import settings
 from app.ui.pages.dashboard import DashboardPage
-from app.ui.pages.settings import SettingsPage
 from app.ui.pages.sessions import SessionsPage
+from app.ui.pages.settings import SettingsPage
 from app.ui.pages.transparency import TransparencyPage
 from app.ui.widgets.toast import ToastManager
 

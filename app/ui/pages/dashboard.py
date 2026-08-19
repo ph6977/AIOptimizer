@@ -1,12 +1,26 @@
 """用量面板页面"""
 import httpx
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QGridLayout, QGroupBox, QProgressBar, QPushButton
+from PySide6.QtCharts import (
+    QBarCategoryAxis,
+    QBarSeries,
+    QBarSet,
+    QChart,
+    QChartView,
+    QLineSeries,
+    QValueAxis,
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QThread
-from PySide6.QtCharts import QChart, QChartView, QLineSeries, QBarSet, QBarSeries, QValueAxis, QBarCategoryAxis
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QPainter
+from PySide6.QtWidgets import (
+    QComboBox,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.core.config import settings
 

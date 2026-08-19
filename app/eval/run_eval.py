@@ -1,13 +1,14 @@
 """评估运行器：llm-as-judge 对比压缩前后质量"""
 import asyncio
-import httpx
 import json
 import statistics
 from datetime import datetime
 from pathlib import Path
-from app.eval.dataset import get_all_cases, EvalCase
-from app.core.config import settings
 
+import httpx
+
+from app.core.config import settings
+from app.eval.dataset import EvalCase, get_all_cases
 
 JUDGE_PROMPT = """你是一个严格的 AI 回答质量评估员。请对比两个回答的质量，打分 1-5 分。
 
@@ -36,7 +37,7 @@ JUDGE_PROMPT = """你是一个严格的 AI 回答质量评估员。请对比两�
 
 
 class Evaluator:
-    def __init__(self, judge_model: str = "deepseek-chat", gateway_url: str = None):
+    def __init__(self, judge_model: str = "deepseek-chat", gateway_url: str | None = None):
         self.judge_model = judge_model
         self.gateway_url = gateway_url or f"http://{settings.gateway_host}:{settings.gateway_port}"
         self.client = httpx.AsyncClient(timeout=60.0)
@@ -110,7 +111,7 @@ class Evaluator:
             "answer_b_len": len(answer_b),
         }
 
-    async def run(self, cases: list[EvalCase] = None) -> dict:
+    async def run(self, cases: list[EvalCase] | None = None) -> dict:
         cases = cases or get_all_cases()
         results = []
 
@@ -199,8 +200,7 @@ async def main():
         f.write(f"- 分数差 (B-A): {report['score_diff']:.2f}\n")
         f.write(f"- 胜负: A胜 {report['winners']['A']}, B胜 {report['winners']['B']}, 平局 {report['winners']['tie']}\n\n")
         f.write("## 分类别详情\n\n")
-        for t, v in report["by_type"].items():
-            f.write(f"- {t}: 无压缩 {v['avg_a']:.2f}, 有压缩 {v['avg_b']:.2f}, A胜 {v['winners']['A']}, B胜 {v['winners']['B']}, 平 {v['winners']['tie']}\n")
+        f.writelines(f"- {t}: 无压缩 {v['avg_a']:.2f}, 有压缩 {v['avg_b']:.2f}, A胜 {v['winners']['A']}, B胜 {v['winners']['B']}, 平 {v['winners']['tie']}\n" for t, v in report["by_type"].items())
     print(f"Markdown saved to: {md_file}")
 
 

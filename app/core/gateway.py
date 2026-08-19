@@ -1,18 +1,19 @@
 """FastAPI 网关：OpenAI 兼容代理 + 优化管线"""
-import uuid
 import time
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+
 import httpx
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import settings
 from app.core.db import init_db, log_usage
-from app.providers import ProviderFactory, ChatCompletionRequest, ChatMessage
 from app.optimizer.compressor import compressor
-from app.optimizer.router import router, RoutingDecision
 from app.optimizer.prompt_enhancer import prompt_enhancer
+from app.optimizer.router import RoutingDecision, router
+from app.providers import ChatCompletionRequest, ChatMessage, ProviderFactory
 
 
 @asynccontextmanager
@@ -91,7 +92,7 @@ async def list_models():
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """核心代理端点：压缩 → 路由 → 增强 → 转发"""
-    start_time = time.time()
+    time.time()
     request_id = str(uuid.uuid4())[:8]
     session_id = request.headers.get("x-session-id", "default")
 
@@ -215,7 +216,7 @@ async def chat_completions(request: Request):
     except httpx.HTTPStatusError as e:
         raise HTTPException(e.response.status_code, f"Upstream error: {e.response.text}")
     except Exception as e:
-        raise HTTPException(500, f"Gateway error: {str(e)}")
+        raise HTTPException(500, f"Gateway error: {e!s}")
 
 
 @app.get("/v1/usage/stats")

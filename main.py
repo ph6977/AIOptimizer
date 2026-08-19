@@ -1,9 +1,9 @@
 """应用入口：启动 GUI + 后台网关线程"""
 import sys
 import threading
+
 import uvicorn
 from PySide6.QtWidgets import QApplication
-from PySide6.QtCore import QTimer
 
 from app.core.config import settings
 from app.ui.main_window import MainWindow
@@ -39,8 +39,9 @@ def main():
 
     # 确保退出时清理
     def on_exit():
-        from app.providers import ProviderFactory
         import asyncio
+
+        from app.providers import ProviderFactory
         asyncio.run(ProviderFactory.close_all())
 
     app.aboutToQuit.connect(on_exit)

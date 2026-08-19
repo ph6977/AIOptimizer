@@ -1,8 +1,6 @@
 """提示词增强引擎"""
-from typing import Literal
+from app.optimizer.router import TaskType, router
 from app.providers import ChatMessage
-from app.optimizer.router import router, TaskType
-
 
 ENHANCED_SYSTEM_PROMPTS = {
     "chat": """你是一个有用、无害、诚实的 AI 助手。请用自然、专业的语言回答用户问题。""",

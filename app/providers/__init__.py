@@ -1,7 +1,9 @@
 """Provider 适配器基类"""
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Optional
+from typing import Optional
+
 import httpx
 
 
@@ -19,7 +21,7 @@ class ModelInfo:
 class ChatMessage:
     role: str
     content: str
-    name: Optional[str] = None
+    name: str | None = None
 
 
 @dataclass
@@ -27,7 +29,7 @@ class ChatCompletionRequest:
     model: str
     messages: list[ChatMessage]
     temperature: float = 0.7
-    max_tokens: Optional[int] = None
+    max_tokens: int | None = None
     stream: bool = False
     extra: dict = field(default_factory=dict)
 
@@ -54,23 +56,19 @@ class ProviderAdapter(ABC):
     @abstractmethod
     def provider_name(self) -> str:
         """Provider 标识名"""
-        pass
 
     @property
     @abstractmethod
     def default_base_url(self) -> str:
         """默认基础 URL"""
-        pass
 
     @abstractmethod
     async def list_models(self) -> list[ModelInfo]:
         """获取可用模型列表"""
-        pass
 
     @abstractmethod
     async def chat_completion(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
         """非流式聊天完成"""
-        pass
 
     @abstractmethod
     async def chat_completion_stream(self, request: ChatCompletionRequest) -> AsyncIterator[str]:
@@ -91,7 +89,6 @@ class ProviderAdapter(ABC):
     @abstractmethod
     def _get_headers(self) -> dict[str, str]:
         """获取请求头"""
-        pass
 
     async def close(self):
         if self.client and not self.client.is_closed:

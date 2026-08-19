@@ -1,12 +1,23 @@
 """设置页面"""
 import httpx
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
-    QLabel, QLineEdit, QPushButton, QCheckBox, QSlider, QSpinBox,
-    QDoubleSpinBox, QTableWidget, QTableWidgetItem, QHeaderView,
-    QMessageBox, QComboBox, QTabWidget, QScrollArea
-)
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.core.config import settings
 
@@ -171,7 +182,7 @@ class SettingsPage(QWidget):
         self.provider_rows.append(row)
 
     def _remove_provider_row(self):
-        rows = set(item.row() for item in self.provider_table.selectedItems())
+        rows = {item.row() for item in self.provider_table.selectedItems()}
         for row in sorted(rows, reverse=True):
             self.provider_table.removeRow(row)
             if row in self.provider_rows:
@@ -190,7 +201,7 @@ class SettingsPage(QWidget):
         if not name_item or not key_widget:
             return
 
-        provider_name = name_item.text()
+        name_item.text()
         api_key = key_widget.text()
         base_url = url_item.text() if url_item else ""
 

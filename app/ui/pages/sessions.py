@@ -1,15 +1,19 @@
 """会话管理页面"""
-import httpx
 import json
-from datetime import datetime
+
+import httpx
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QFileDialog, QComboBox, QLineEdit, QGroupBox, QFormLayout
+    QFileDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QTableWidget,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, QTimer, QThread, Signal
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtCore import QUrl
 
 from app.core.config import settings
 
@@ -93,7 +97,7 @@ class SessionsPage(QWidget):
         layout.addWidget(placeholder)
 
     def _export_sessions(self):
-        rows = set(item.row() for item in self.table.selectedItems())
+        rows = {item.row() for item in self.table.selectedItems()}
         if not rows:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "提示", "请先选择要导出的行")
@@ -121,8 +125,7 @@ class SessionsPage(QWidget):
                     f.write("# 会话导出\n\n")
                     for d in data:
                         f.write(f"## {d.get('时间', '')}\n")
-                        for k, v in d.items():
-                            f.write(f"- **{k}**: {v}\n")
+                        f.writelines(f"- **{k}**: {v}\n" for k, v in d.items())
                         f.write("\n")
             else:
                 with open(path, "w", encoding="utf-8") as f:
