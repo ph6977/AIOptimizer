@@ -15,7 +15,10 @@ async def init_db() -> None:
     DB_PATH = data_dir / "usage.db"
     settings.usage_db_path = str(DB_PATH)
 
-    async with aiosqlite.connect(DB_PATH) as db:
+    # Windows: 使用原始字符串路径，避免 URI 参数问题
+    db_path_str = str(DB_PATH)
+    print(f"[DEBUG] DB_PATH={DB_PATH}, str={db_path_str}")  # 调试
+    async with aiosqlite.connect(db_path_str) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS usage_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +29,7 @@ async def init_db() -> None:
                 response_tokens INTEGER NOT NULL,
                 total_tokens INTEGER NOT NULL,
                 cost_usd REAL DEFAULT 0,
-                compressed: BOOLEAN DEFAULT 0,
+                compressed BOOLEAN DEFAULT 0,
                 original_tokens INTEGER DEFAULT 0,
                 saved_tokens INTEGER DEFAULT 0,
                 request_id TEXT,
@@ -46,7 +49,8 @@ async def init_db() -> None:
 async def get_db():
     if DB_PATH is None:
         await init_db()
-    async with aiosqlite.connect(DB_PATH) as db:
+    db_path_str = str(DB_PATH)
+    async with aiosqlite.connect(db_path_str) as db:
         db.row_factory = aiosqlite.Row
         yield db
 
