@@ -1,7 +1,13 @@
-"""评估运行器：llm-as-judge 对比压缩前后质量"""
+"""评估运行器：llm-as-judge 对比压缩前后质量
+
+支持两种模式：
+1. HTTP 模式：通过网关（需配置真实 Provider Key）
+2. 进程内 Mock 模式：直接调用 Mock ProviderAdapter（无需网关，用于 CI/快速验证）
+"""
 
 import asyncio
 import json
+import os
 import statistics
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,6 +17,7 @@ import httpx
 
 from app.core.config import settings
 from app.eval.dataset import EvalCase, get_all_cases
+from app.providers import ChatCompletionRequest, ChatMessage, ProviderFactory
 
 JUDGE_PROMPT = """你是一个严格的 AI 回答质量评估员。请对比两个回答的质量，打分 1-5 分。
 
@@ -40,18 +47,146 @@ JUDGE_PROMPT = """你是一个严格的 AI 回答质量评估员。请对比两�
 
 class Evaluator:
     def __init__(
-        self, judge_model: str = "deepseek-chat", gateway_url: str | None = None
+        self,
+        judge_model: str = "deepseek-chat",
+        gateway_url: str | None = None,
+        use_mock: bool = False,
     ) -> None:
         self.judge_model = judge_model
         self.gateway_url = (
             gateway_url or f"http://{settings.gateway_host}:{settings.gateway_port}"
         )
+        self.use_mock = use_mock
         self.client = httpx.AsyncClient(timeout=60.0)
+
+        # 进程内 Mock Provider（若启用）
+        if self.use_mock:
+            self._register_mock_provider()
+
+    def _register_mock_provider(self) -> None:
+        """注册进程内 Mock Provider"""
+        from app.core.config import ProviderConfig, settings
+
+        original_create = ProviderFactory.create
+
+        @classmethod
+        def patched_create(cls, provider_config):  # type: ignore[misc]
+            if provider_config.name == "mock":
+                key = "mock:mock"
+                if key not in cls._adapters:
+                    cls._adapters[key] = self._create_mock_adapter()
+                return cls._adapters[key]
+            return original_create(provider_config)
+
+        ProviderFactory.create = patched_create  # type: ignore[assignment]
+
+        mock_config = ProviderConfig(
+            name="mock",
+            display_name="Mock Provider",
+            api_key="mock",
+            base_url="",
+            models=["mock-model", "mock-model-vision"],
+            enabled=True,
+            priority=0,
+        )
+        settings.set_providers([mock_config])
+        print("[Mock Mode] Mock Provider registered")
+
+    def _create_mock_adapter(self):
+        """创建 Mock Adapter 实例"""
+        from app.providers import (
+            ChatCompletionRequest,
+            ChatCompletionResponse,
+            ChatMessage,
+            ModelInfo,
+            ProviderAdapter,
+        )
+
+        MOCK_RESPONSES = {
+            "装饰器": "Python 装饰器是一个函数，它接收另一个函数作为参数并返回一个新函数。常用语法：@decorator。核心原理是高阶函数 + 闭包。典型用途：日志、计时、权限检查、缓存。",
+            "RESTful": "RESTful API 是基于 HTTP 协议的架构风格：资源用名词表示（/users）、HTTP 动词表达操作（GET/POST/PUT/DELETE）、状态码表达结果（200/201/404/500）。核心原则：无状态、统一接口、资源导向。",
+            "端口占用": "Linux 查看端口占用：`ss -tlnp` 或 `netstat -tlnp` 或 `lsof -i:PORT`。其中 ss 更现代、速度更快。输出包含进程 PID 和程序名，便于定位并 kill。",
+            "单例": "Python 单例模式实现：重写 __new__ 方法，用类变量 _instance 存储实例，配合 threading.Lock 保证线程安全。也可用元类或模块级变量（天然单例）。",
+            "LRU": "LRU 缓存 O(1) 实现：哈希表 + 双向链表。哈希表键为 key、值为链表节点；链表头部为最近使用、尾部为最久未用。get/put 操作移动节点到头部，满容量时删尾部。Python 标准库：functools.lru_cache。",
+            "异步 HTTP": "aiohttp 异步客户端：ClientSession 复用连接池，async with session.get() 自动释放。重试可用 tenacity 或手写指数退避。超时用 aiohttp.ClientTimeout(total=..., connect=...)。",
+            "斐波那契": "斐波那契数列：fib(0)=0, fib(1)=1, fib(n)=fib(n-1)+fib(n-2)。递归指数级 O(2^n)，记忆化/动态规划 O(n)，矩阵快速幂 O(log n)。",
+            "逻辑传递": "若所有 A 是 B，所有 B 是 C，则所有 A 是 C。这是三段论的传递性，形式逻辑有效。前提真则结论必真。",
+            "睡莲": "第 29 天。每天翻倍，第 30 天满，则第 29 天是一半。指数增长特性：倒数第二天覆盖一半。",
+            "三个数": "三个数是 2, 3, 15。2+3+15=20，2*3*15=90。由因式分解 90=2*3*3*5，尝试组合得解。",
+            "五言绝句": "代码满屏飞，屏幕照夜归。深夜敲键响，键盘伴我醉。",
+            "产品经理": "产品经理：这需求很简单，上线前加个按钮。程序员：按钮在哪？产品经理：右上角。程序员：右上角有用户头像。产品经理：那就左下角。程序员：左下角是版权声明。产品经理：那你决定吧，反正下周上线。",
+            "Python Go": "Python 并发：GIL 限制多线程 CPU 密集型，用 multiprocessing 或 asyncio 协程（适合 IO 密集）。Go 并发：goroutine 轻量级线程，channel 通信，原生并行，适合 CPU+IO 混合。内存：Go 更低、启动更快。",
+            "复杂度": "foo(n) 是递归斐波那契，时间复杂度 O(2^n) 指数级，空间 O(n) 栈深度。重复计算导致指数爆炸。优化：记忆化 O(n)、迭代 O(n)、矩阵快速幂 O(log n)。",
+        }
+
+        class MockAdapter(ProviderAdapter):
+            def __init__(self, **kwargs):
+                super().__init__(api_key="mock", base_url="", **kwargs)
+
+            @property
+            def provider_name(self) -> str:
+                return "mock"
+
+            @property
+            def default_base_url(self) -> str:
+                return ""
+
+            def _get_headers(self) -> dict[str, str]:
+                return {}
+
+            async def list_models(self):
+                return [
+                    ModelInfo("mock-model", "Mock Model", 8192, 0.0, 0.0, ["chat"]),
+                    ModelInfo("mock-model-vision", "Mock Vision Model", 8192, 0.0, 0.0, ["chat", "vision"]),
+                ]
+
+            def _pick_response(self, user_content: str) -> str:
+                for kw, resp in MOCK_RESPONSES.items():
+                    if kw in user_content:
+                        return resp
+                return "这是一个模拟回复。收到：" + user_content[:100]
+
+            async def chat_completion(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+                user_content = ""
+                for m in reversed(request.messages):
+                    if m.role == "user":
+                        user_content = m.content
+                        break
+                response_text = self._pick_response(user_content)
+                prompt_tokens = sum(len(m.content) for m in request.messages) // 2
+                completion_tokens = len(response_text) // 2
+                return ChatCompletionResponse(
+                    id="chatcmpl-mock",
+                    model=request.model,
+                    choices=[{"index": 0, "message": {"role": "assistant", "content": response_text}, "finish_reason": "stop"}],
+                    usage={"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens},
+                )
+
+            async def chat_completion_stream(self, request: ChatCompletionRequest):
+                import json as json_lib
+                import asyncio
+                user_content = ""
+                for m in reversed(request.messages):
+                    if m.role == "user":
+                        user_content = m.content
+                        break
+                response_text = self._pick_response(user_content)
+                for i in range(0, len(response_text), 10):
+                    chunk = response_text[i:i+10]
+                    yield f"data: {json_lib.dumps({'choices': [{'delta': {'content': chunk}, 'index': 0}]})}\n\n"
+                    await asyncio.sleep(0.01)
+                yield "data: [DONE]\n\n"
+
+        return MockAdapter()
 
     async def get_response(
         self, messages: list[dict[str, Any]], use_compression: bool
     ) -> str:
-        """通过网关获取回答"""
+        """获取回答：Mock 模式直接调用 Adapter，否则走 HTTP"""
+        if self.use_mock:
+            return await self._get_response_mock(messages, use_compression)
+
+        # HTTP 模式（原逻辑）
         payload: dict[str, Any] = {
             "model": "auto" if use_compression else messages[-1].get("model", "auto"),
             "messages": messages,
@@ -59,7 +194,7 @@ class Evaluator:
             "stream": False,
         }
         if not use_compression:
-            payload["model"] = "deepseek-chat"  # 固定基准模型
+            payload["model"] = "deepseek-chat"
 
         resp = await self.client.post(
             f"{self.gateway_url}/v1/chat/completions", json=payload
@@ -70,13 +205,94 @@ class Evaluator:
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return str(content)
 
+    async def _get_response_mock(
+        self, messages: list[dict[str, Any]], use_compression: bool
+    ) -> str:
+        """进程内 Mock 调用"""
+        # 构造请求
+        chat_messages = [
+            ChatMessage(role=m["role"], content=m.get("content", ""), name=m.get("name"))
+            for m in messages
+        ]
+        request = ChatCompletionRequest(
+            model="mock-model" if use_compression else "mock-model",
+            messages=chat_messages,
+            temperature=0.3,
+            stream=False,
+        )
+
+        # 如果无压缩，直接调用 adapter；若有压缩，走完整管线（压缩->路由->增强）
+        if use_compression:
+            from app.optimizer.compressor import compressor
+            from app.optimizer.prompt_enhancer import prompt_enhancer
+            from app.optimizer.router import router
+            from app.core.config import settings
+
+            # 压缩
+            compressed_messages, _ = await compressor.compress(
+                chat_messages,
+                target_tokens=settings.target_context_tokens,
+                max_context_tokens=settings.max_context_tokens,
+            )
+            # 路由
+            if settings.routing_enabled:
+                # 在 mock 模式下直接使用 mock adapter，不需要路由决策
+                if self.use_mock:
+                    request.model = "mock-model"
+                else:
+                    providers = settings.get_providers()
+                    routing_decision = router.route(request, providers)
+                    request.model = routing_decision.model
+            # 增强
+            if settings.prompt_enhancement_enabled:
+                compressed_messages = prompt_enhancer.enhance(compressed_messages)
+
+            # 调用 adapter - mock 模式直接用 mock adapter
+            if self.use_mock:
+                adapter = self._create_mock_adapter()
+            else:
+                adapter = ProviderFactory.create(settings.get_providers()[0])
+            resp = await adapter.chat_completion(
+                ChatCompletionRequest(
+                    model=request.model,
+                    messages=compressed_messages,
+                    temperature=0.3,
+                    stream=False,
+                )
+            )
+        else:
+            # 无压缩：直接调用 adapter
+            adapter = self._create_mock_adapter()
+            resp = await adapter.chat_completion(request)
+
+        content = resp.choices[0].get("message", {}).get("content", "") if isinstance(resp.choices[0], dict) else resp.choices[0].message.content
+        return str(content)
+
     async def judge(
         self, question: str, answer_a: str, answer_b: str
     ) -> dict[str, Any]:
-        """LLM-as-judge 评分"""
-        prompt = JUDGE_PROMPT.format(
-            question=question, answer_a=answer_a, answer_b=answer_b
-        )
+        prompt = JUDGE_PROMPT.format(question=question, answer_a=answer_a, answer_b=answer_b)
+
+        if self.use_mock:
+            # Mock 评分：简单启发式打分，避免 HTTP 调用
+            # 基于答案长度和关键词匹配给分
+            def score_answer(ans: str) -> int:
+                length_score = min(len(ans) / 200, 3)  # 长度最多 3 分
+                keyword_bonus = sum(1 for kw in ["代码", "函数", "实现", "步骤", "分析", "总结"] if kw in ans)
+                return max(1, min(5, int(length_score + keyword_bonus)))
+
+            score_a = score_answer(answer_a)
+            score_b = score_answer(answer_b)
+            winner = "A" if score_a > score_b else "B" if score_b > score_a else "tie"
+            return {
+                "score_a": score_a,
+                "score_b": score_b,
+                "winner": winner,
+                "reason": "Mock heuristic scoring",
+            }
+
+        # HTTP 模式（需真实 Judge Key）
+        prompt = JUDGE_PROMPT.format(question=question, answer_a=answer_a, answer_b=answer_b)
         payload = {
             "model": self.judge_model,
             "messages": [{"role": "user", "content": prompt}],
@@ -204,8 +420,8 @@ class Evaluator:
 
 
 async def main() -> None:
-    print("Starting evaluation...")
-    evaluator = Evaluator()
+    print("Starting evaluation (mock mode)...")
+    evaluator = Evaluator(use_mock=True)
     report = await evaluator.run()
 
     # 保存报告
