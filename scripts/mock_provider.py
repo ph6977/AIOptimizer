@@ -1,10 +1,11 @@
 """进程内 Mock Provider：直接注册到 ProviderFactory，用于评估测试"""
-from typing import Any, AsyncIterator, ClassVar
+
+from collections.abc import AsyncIterator
+from typing import ClassVar
 
 from app.providers import (
     ChatCompletionRequest,
     ChatCompletionResponse,
-    ChatMessage,
     ModelInfo,
     ProviderAdapter,
     ProviderFactory,
@@ -49,7 +50,14 @@ class MockProviderAdapter(ProviderAdapter):
     async def list_models(self) -> list[ModelInfo]:
         return [
             ModelInfo("mock-model", "Mock Model", 8192, 0.0, 0.0, ["chat"]),
-            ModelInfo("mock-model-vision", "Mock Vision Model", 8192, 0.0, 0.0, ["chat", "vision"]),
+            ModelInfo(
+                "mock-model-vision",
+                "Mock Vision Model",
+                8192,
+                0.0,
+                0.0,
+                ["chat", "vision"],
+            ),
         ]
 
     def _pick_response(self, user_content: str) -> str:
@@ -58,7 +66,9 @@ class MockProviderAdapter(ProviderAdapter):
                 return resp
         return "这是一个模拟回复。收到：" + user_content[:100]
 
-    async def chat_completion(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+    async def chat_completion(
+        self, request: ChatCompletionRequest
+    ) -> ChatCompletionResponse:
         # 提取最后一条用户消息
         user_content = ""
         for m in reversed(request.messages):
@@ -74,11 +84,13 @@ class MockProviderAdapter(ProviderAdapter):
         return ChatCompletionResponse(
             id="chatcmpl-mock",
             model=request.model,
-            choices=[{
-                "index": 0,
-                "message": {"role": "assistant", "content": response_text},
-                "finish_reason": "stop",
-            }],
+            choices=[
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": response_text},
+                    "finish_reason": "stop",
+                }
+            ],
             usage={
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -86,9 +98,11 @@ class MockProviderAdapter(ProviderAdapter):
             },
         )
 
-    async def chat_completion_stream(self, request: ChatCompletionRequest) -> AsyncIterator[str]:
-        import json
+    async def chat_completion_stream(
+        self, request: ChatCompletionRequest
+    ) -> AsyncIterator[str]:
         import asyncio
+        import json
 
         user_content = ""
         for m in reversed(request.messages):
@@ -100,7 +114,7 @@ class MockProviderAdapter(ProviderAdapter):
 
         # 模拟流式：分块 yield
         for i in range(0, len(response_text), 10):
-            chunk = response_text[i:i+10]
+            chunk = response_text[i : i + 10]
             yield f"data: {json.dumps({'choices': [{'delta': {'content': chunk}, 'index': 0}]})}\n\n"
             await asyncio.sleep(0.01)
         yield "data: [DONE]\n\n"

@@ -1,6 +1,8 @@
 """Mock OpenAI 兼容服务器：用于评估测试，返回确定性响应"""
+
 import asyncio
 import json
+
 from aiohttp import web
 
 MOCK_MODELS = {
@@ -59,7 +61,9 @@ async def handle_chat_completions(request):
     if stream:
         # 模拟流式：逐字符 yield
         async def stream_gen():
-            for chunk in [response_text[i:i+10] for i in range(0, len(response_text), 10)]:
+            for chunk in [
+                response_text[i : i + 10] for i in range(0, len(response_text), 10)
+            ]:
                 yield f"data: {json.dumps({'choices': [{'delta': {'content': chunk}, 'index': 0}]} )}\n\n"
                 await asyncio.sleep(0.01)
             yield "data: [DONE]\n\n"
@@ -74,18 +78,22 @@ async def handle_chat_completions(request):
             "id": "chatcmpl-mock",
             "object": "chat.completion",
             "model": model,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": response_text},
-                "finish_reason": "stop",
-            }],
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": response_text},
+                    "finish_reason": "stop",
+                }
+            ],
             "usage": {
                 "prompt_tokens": sum(len(m.get("content", "")) for m in messages) // 2,
                 "completion_tokens": len(response_text) // 2,
                 "total_tokens": 0,
             },
         }
-        resp["usage"]["total_tokens"] = resp["usage"]["prompt_tokens"] + resp["usage"]["completion_tokens"]
+        resp["usage"]["total_tokens"] = (
+            resp["usage"]["prompt_tokens"] + resp["usage"]["completion_tokens"]
+        )
         return web.json_response(resp)
 
 

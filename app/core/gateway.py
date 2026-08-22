@@ -5,7 +5,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, ClassVar
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -23,7 +23,7 @@ from app.providers import ChatCompletionRequest, ChatMessage, ProviderFactory
 class MockProviderAdapter:
     """进程内 Mock 适配器：用于测试评估"""
 
-    MOCK_RESPONSES = {
+    MOCK_RESPONSES: ClassVar[dict[str, str]] = {
         "装饰器": "Python 装饰器是一个函数，它接收另一个函数作为参数并返回一个新函数。常用语法：@decorator。核心原理是高阶函数 + 闭包。典型用途：日志、计时、权限检查、缓存。",
         "RESTful": "RESTful API 是基于 HTTP 协议的架构风格：资源用名词表示（/users）、HTTP 动词表达操作（GET/POST/PUT/DELETE）、状态码表达结果（200/201/404/500）。核心原则：无状态、统一接口、资源导向。",
         "端口占用": "Linux 查看端口占用：`ss -tlnp` 或 `netstat -tlnp` 或 `lsof -i:PORT`。其中 ss 更现代、速度更快。输出包含进程 PID 和程序名，便于定位并 kill。",
@@ -40,7 +40,7 @@ class MockProviderAdapter:
         "复杂度": "foo(n) 是递归斐波那契，时间复杂度 O(2^n) 指数级，空间 O(n) 栈深度。重复计算导致指数爆炸。优化：记忆化 O(n)、迭代 O(n)、矩阵快速幂 O(log n)。",
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     @property
@@ -54,11 +54,19 @@ class MockProviderAdapter:
     def _get_headers(self) -> dict[str, str]:
         return {}
 
-    async def list_models(self):
+    async def list_models(self) -> list[Any]:
         from app.providers import ModelInfo
+
         return [
             ModelInfo("mock-model", "Mock Model", 8192, 0.0, 0.0, ["chat"]),
-            ModelInfo("mock-model-vision", "Mock Vision Model", 8192, 0.0, 0.0, ["chat", "vision"]),
+            ModelInfo(
+                "mock-model-vision",
+                "Mock Vision Model",
+                8192,
+                0.0,
+                0.0,
+                ["chat", "vision"],
+            ),
         ]
 
     def _pick_response(self, user_content: str) -> str:
@@ -67,8 +75,9 @@ class MockProviderAdapter:
                 return resp
         return "这是一个模拟回复。收到：" + user_content[:100]
 
-    async def chat_completion(self, request):
-        from app.providers import ChatCompletionResponse, ChatMessage
+    async def chat_completion(self, request: Any) -> Any:
+        from app.providers import ChatCompletionResponse
+
         user_content = ""
         for m in reversed(request.messages):
             if m.role == "user":
@@ -80,11 +89,13 @@ class MockProviderAdapter:
         return ChatCompletionResponse(
             id="chatcmpl-mock",
             model=request.model,
-            choices=[{
-                "index": 0,
-                "message": {"role": "assistant", "content": response_text},
-                "finish_reason": "stop",
-            }],
+            choices=[
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": response_text},
+                    "finish_reason": "stop",
+                }
+            ],
             usage={
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -92,9 +103,10 @@ class MockProviderAdapter:
             },
         )
 
-    async def chat_completion_stream(self, request):
-        import json
+    async def chat_completion_stream(self, request: Any) -> Any:
         import asyncio
+        import json
+
         user_content = ""
         for m in reversed(request.messages):
             if m.role == "user":
@@ -102,13 +114,13 @@ class MockProviderAdapter:
                 break
         response_text = self._pick_response(user_content)
         for i in range(0, len(response_text), 10):
-            chunk = response_text[i:i+10]
+            chunk = response_text[i : i + 10]
             yield f"data: {json.dumps({'choices': [{'delta': {'content': chunk}, 'index': 0}]})}\n\n"
             await asyncio.sleep(0.01)
         yield "data: [DONE]\n\n"
 
 
-def _register_mock_provider():
+def _register_mock_provider() -> None:
     """注册 Mock Provider 到工厂（测试模式）"""
     if os.getenv("AIOPTIMIZER_TEST_MODE") != "1":
         return
@@ -117,8 +129,7 @@ def _register_mock_provider():
 
     original_create = ProviderFactory.create
 
-    @classmethod
-    def patched_create(cls, provider_config):  # type: ignore[misc]
+    def patched_create(cls: Any, provider_config: Any) -> Any:
         if provider_config.name == "mock":
             key = "mock:mock"
             if key not in cls._adapters:
@@ -138,6 +149,7 @@ def _register_mock_provider():
         priority=0,
     )
     settings.set_providers([mock_config])
+    print("[Test Mode] Mock Provider registered")
     print("[Test Mode] Mock Provider registered")
 
 

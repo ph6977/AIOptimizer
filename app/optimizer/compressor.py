@@ -150,6 +150,7 @@ class Compressor:
         messages: list[ChatMessage],
         target_tokens: int | None = None,
         max_context_tokens: int | None = None,
+        keep_recent: int | None = None,
     ) -> tuple[list[ChatMessage], dict[str, Any]]:
         """
         压缩消息列表
@@ -188,15 +189,22 @@ class Compressor:
         other_messages = [m for m in messages if m.role != "system"]
 
         # 保留最近 N 轮对话不压缩（默认保留最后 4 条非系统消息）
-        keep_recent = 4
-        to_compress = (
-            other_messages[:-keep_recent] if len(other_messages) > keep_recent else []
-        )
-        recent_messages = (
-            other_messages[-keep_recent:]
-            if len(other_messages) > keep_recent
-            else other_messages
-        )
+        keep_recent = keep_recent if keep_recent is not None else 4
+        if keep_recent > 0:
+            to_compress = (
+                other_messages[:-keep_recent]
+                if len(other_messages) > keep_recent
+                else []
+            )
+            recent_messages = (
+                other_messages[-keep_recent:]
+                if len(other_messages) > keep_recent
+                else other_messages
+            )
+        else:
+            # keep_recent=0: 压缩所有非系统消息，不保留最近消息
+            to_compress = other_messages
+            recent_messages = []
 
         if not to_compress:
             return messages, {

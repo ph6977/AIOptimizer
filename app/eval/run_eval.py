@@ -7,8 +7,8 @@
 
 import asyncio
 import json
-import os
 import statistics
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -69,8 +69,7 @@ class Evaluator:
 
         original_create = ProviderFactory.create
 
-        @classmethod
-        def patched_create(cls, provider_config):  # type: ignore[misc]
+        def patched_create(cls: Any, provider_config: Any) -> Any:
             if provider_config.name == "mock":
                 key = "mock:mock"
                 if key not in cls._adapters:
@@ -92,12 +91,11 @@ class Evaluator:
         settings.set_providers([mock_config])
         print("[Mock Mode] Mock Provider registered")
 
-    def _create_mock_adapter(self):
+    def _create_mock_adapter(self) -> Any:
         """创建 Mock Adapter 实例"""
         from app.providers import (
             ChatCompletionRequest,
             ChatCompletionResponse,
-            ChatMessage,
             ModelInfo,
             ProviderAdapter,
         )
@@ -120,7 +118,7 @@ class Evaluator:
         }
 
         class MockAdapter(ProviderAdapter):
-            def __init__(self, **kwargs):
+            def __init__(self, **kwargs: Any) -> None:
                 super().__init__(api_key="mock", base_url="", **kwargs)
 
             @property
@@ -134,10 +132,17 @@ class Evaluator:
             def _get_headers(self) -> dict[str, str]:
                 return {}
 
-            async def list_models(self):
+            async def list_models(self) -> list[ModelInfo]:
                 return [
                     ModelInfo("mock-model", "Mock Model", 8192, 0.0, 0.0, ["chat"]),
-                    ModelInfo("mock-model-vision", "Mock Vision Model", 8192, 0.0, 0.0, ["chat", "vision"]),
+                    ModelInfo(
+                        "mock-model-vision",
+                        "Mock Vision Model",
+                        8192,
+                        0.0,
+                        0.0,
+                        ["chat", "vision"],
+                    ),
                 ]
 
             def _pick_response(self, user_content: str) -> str:
@@ -146,25 +151,68 @@ class Evaluator:
                         return resp
                 return "这是一个模拟回复。收到：" + user_content[:100]
 
-            async def chat_completion(self, request: ChatCompletionRequest) -> ChatCompletionResponse:
+            def _degrade_response(
+                self, response_text: str, comp_stats: dict[str, Any]
+            ) -> str:
+                """模拟压缩导致的质量下降"""
+                saved_ratio = comp_stats.get("saved_ratio", 0)
+                if saved_ratio <= 0:
+                    return response_text
+                # 压缩越多，保留信息越少
+                keep_ratio = 1 - saved_ratio * 0.6  # 最多丢 60% 信息
+                keep_len = max(int(len(response_text) * keep_ratio), 50)
+                degraded = response_text[:keep_len]
+                # 添加降质标记
+                if keep_len < len(response_text):
+                    degraded += f" [压缩丢失 {saved_ratio:.0%} 信息]"
+                return degraded
+
+            async def chat_completion(
+                self, request: ChatCompletionRequest
+            ) -> ChatCompletionResponse:
                 user_content = ""
                 for m in reversed(request.messages):
                     if m.role == "user":
                         user_content = m.content
                         break
                 response_text = self._pick_response(user_content)
+
+                # 检测是否为压缩请求
+                is_compressed = (
+                    request.extra.get("compressed", False) if request.extra else False
+                )
+                comp_stats = (
+                    request.extra.get("comp_stats", {}) if request.extra else {}
+                )
+
+                if is_compressed and comp_stats:
+                    response_text = self._degrade_response(response_text, comp_stats)
+
                 prompt_tokens = sum(len(m.content) for m in request.messages) // 2
                 completion_tokens = len(response_text) // 2
                 return ChatCompletionResponse(
                     id="chatcmpl-mock",
                     model=request.model,
-                    choices=[{"index": 0, "message": {"role": "assistant", "content": response_text}, "finish_reason": "stop"}],
-                    usage={"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": prompt_tokens + completion_tokens},
+                    choices=[
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": response_text},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    usage={
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": prompt_tokens + completion_tokens,
+                    },
                 )
 
-            async def chat_completion_stream(self, request: ChatCompletionRequest):
-                import json as json_lib
+            async def chat_completion_stream(
+                self, request: ChatCompletionRequest
+            ) -> AsyncIterator[str]:
                 import asyncio
+                import json as json_lib
+
                 user_content = ""
                 for m in reversed(request.messages):
                     if m.role == "user":
@@ -172,7 +220,7 @@ class Evaluator:
                         break
                 response_text = self._pick_response(user_content)
                 for i in range(0, len(response_text), 10):
-                    chunk = response_text[i:i+10]
+                    chunk = response_text[i : i + 10]
                     yield f"data: {json_lib.dumps({'choices': [{'delta': {'content': chunk}, 'index': 0}]})}\n\n"
                     await asyncio.sleep(0.01)
                 yield "data: [DONE]\n\n"
@@ -208,35 +256,36 @@ class Evaluator:
     async def _get_response_mock(
         self, messages: list[dict[str, Any]], use_compression: bool
     ) -> str:
-        """进程内 Mock 调用"""
+        """进程内 Mock 调用：模拟压缩降质效果"""
         # 构造请求
         chat_messages = [
-            ChatMessage(role=m["role"], content=m.get("content", ""), name=m.get("name"))
+            ChatMessage(
+                role=m["role"], content=m.get("content", ""), name=m.get("name")
+            )
             for m in messages
         ]
         request = ChatCompletionRequest(
-            model="mock-model" if use_compression else "mock-model",
+            model="mock-model",
             messages=chat_messages,
             temperature=0.3,
             stream=False,
         )
 
-        # 如果无压缩，直接调用 adapter；若有压缩，走完整管线（压缩->路由->增强）
         if use_compression:
+            from app.core.config import settings
             from app.optimizer.compressor import compressor
             from app.optimizer.prompt_enhancer import prompt_enhancer
             from app.optimizer.router import router
-            from app.core.config import settings
 
-            # 压缩
-            compressed_messages, _ = await compressor.compress(
+            # 压缩 - mock 模式强制极低 target + keep_recent=0 以强制触发压缩
+            compressed_messages, comp_stats = await compressor.compress(
                 chat_messages,
-                target_tokens=settings.target_context_tokens,
+                target_tokens=10 if self.use_mock else settings.target_context_tokens,
                 max_context_tokens=settings.max_context_tokens,
+                keep_recent=0 if self.use_mock else None,
             )
             # 路由
             if settings.routing_enabled:
-                # 在 mock 模式下直接使用 mock adapter，不需要路由决策
                 if self.use_mock:
                     request.model = "mock-model"
                 else:
@@ -247,52 +296,111 @@ class Evaluator:
             if settings.prompt_enhancement_enabled:
                 compressed_messages = prompt_enhancer.enhance(compressed_messages)
 
-            # 调用 adapter - mock 模式直接用 mock adapter
+            # 调用 adapter - mock 模式直接用 mock adapter，传入压缩标记
             if self.use_mock:
                 adapter = self._create_mock_adapter()
             else:
                 adapter = ProviderFactory.create(settings.get_providers()[0])
-            resp = await adapter.chat_completion(
-                ChatCompletionRequest(
-                    model=request.model,
-                    messages=compressed_messages,
-                    temperature=0.3,
-                    stream=False,
-                )
+            req = ChatCompletionRequest(
+                model=request.model,
+                messages=compressed_messages,
+                temperature=0.3,
+                stream=False,
+                extra={"compressed": True, "comp_stats": comp_stats},
             )
+            resp = await adapter.chat_completion(req)
         else:
             # 无压缩：直接调用 adapter
             adapter = self._create_mock_adapter()
             resp = await adapter.chat_completion(request)
 
-        content = resp.choices[0].get("message", {}).get("content", "") if isinstance(resp.choices[0], dict) else resp.choices[0].message.content
+        content = (
+            resp.choices[0].get("message", {}).get("content", "")
+            if isinstance(resp.choices[0], dict)
+            else resp.choices[0].message.content
+        )
         return str(content)
 
     async def judge(
         self, question: str, answer_a: str, answer_b: str
     ) -> dict[str, Any]:
-        prompt = JUDGE_PROMPT.format(question=question, answer_a=answer_a, answer_b=answer_b)
+        prompt = JUDGE_PROMPT.format(
+            question=question, answer_a=answer_a, answer_b=answer_b
+        )
 
         if self.use_mock:
-            # Mock 评分：简单启发式打分，避免 HTTP 调用
-            # 基于答案长度和关键词匹配给分
-            def score_answer(ans: str) -> int:
-                length_score = min(len(ans) / 200, 3)  # 长度最多 3 分
-                keyword_bonus = sum(1 for kw in ["代码", "函数", "实现", "步骤", "分析", "总结"] if kw in ans)
-                return max(1, min(5, int(length_score + keyword_bonus)))
+            # 改进的 Mock 评分：多维度启发式，允许 0 分
+            def score_answer(ans: str, question: str) -> dict[str, Any]:
+                # 长度得分 (0-2)
+                length_score = min(len(ans) / 150, 2)
+                # 关键词覆盖 (0-2)
+                keywords = [
+                    "代码",
+                    "函数",
+                    "实现",
+                    "步骤",
+                    "分析",
+                    "总结",
+                    "原理",
+                    "示例",
+                    "逻辑",
+                    "原因",
+                ]
+                keyword_score = min(sum(1 for kw in keywords if kw in ans) * 0.3, 2)
+                # 结构化得分 (0-1)
+                structure_score = (
+                    1
+                    if any(
+                        marker in ans
+                        for marker in [
+                            "1.",
+                            "2.",
+                            "步骤",
+                            "首先",
+                            "其次",
+                            "最后",
+                            "代码",
+                            "```",
+                        ]
+                    )
+                    else 0
+                )
+                # 相关性得分 (0-1)
+                q_words = set(question.replace("?", "").replace("？", "").split())
+                a_words = set(ans.replace("。", "").replace("，", "").split())
+                relevance = min(len(q_words & a_words) * 0.2, 1)
+                total = length_score + keyword_score + structure_score + relevance
+                return {
+                    "score": min(5, round(total)),  # 允许 0 分
+                    "details": {
+                        "length": length_score,
+                        "keyword": keyword_score,
+                        "structure": structure_score,
+                        "relevance": relevance,
+                    },
+                }
 
-            score_a = score_answer(answer_a)
-            score_b = score_answer(answer_b)
+            score_a_detail = score_answer(answer_a, question)
+            score_b_detail = score_answer(answer_b, question)
+            score_a = score_a_detail["score"]
+            score_b = score_b_detail["score"]
+
+            # 模拟压缩降质：如果 B 明显更短且包含"压缩丢失"标记，额外扣分
+            if "[压缩丢失" in answer_b and len(answer_b) < len(answer_a) * 0.8:
+                score_b = max(0, score_b - 1)
+
             winner = "A" if score_a > score_b else "B" if score_b > score_a else "tie"
             return {
                 "score_a": score_a,
                 "score_b": score_b,
                 "winner": winner,
-                "reason": "Mock heuristic scoring",
+                "reason": f"Mock multi-dim scoring: A={score_a_detail}, B={score_b_detail}",
             }
 
         # HTTP 模式（需真实 Judge Key）
-        prompt = JUDGE_PROMPT.format(question=question, answer_a=answer_a, answer_b=answer_b)
+        prompt = JUDGE_PROMPT.format(
+            question=question, answer_a=answer_a, answer_b=answer_b
+        )
         payload = {
             "model": self.judge_model,
             "messages": [{"role": "user", "content": prompt}],

@@ -1,22 +1,26 @@
 """启动并驻留 Mock OpenAI 服务器"""
+
+import atexit
+import os
 import subprocess
 import sys
-import os
 import time
-import atexit
 
 SERVER_SCRIPT = os.path.join(os.path.dirname(__file__), "mock_openai_server.py")
 PORT = 8001
 
+
 # 杀掉旧进程
 def kill_port(port):
     import subprocess
+
     result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True)
     for line in result.stdout.splitlines():
         if f":{port}" in line and "LISTENING" in line:
             parts = line.split()
             pid = parts[-1]
             subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True)
+
 
 kill_port(PORT)
 time.sleep(0.5)
@@ -33,6 +37,7 @@ proc = subprocess.Popen(
 for _ in range(20):
     try:
         import httpx
+
         r = httpx.get(f"http://127.0.0.1:{PORT}/models", timeout=1)
         if r.status_code == 200:
             print(f"Mock server started on port {PORT}, PID={proc.pid}")
@@ -43,12 +48,14 @@ else:
     print("Mock server failed to start")
     sys.exit(1)
 
+
 # 注册退出时清理
 def cleanup():
     try:
         proc.terminate()
     except Exception:
         pass
+
 
 atexit.register(cleanup)
 
