@@ -10,6 +10,7 @@ from PySide6.QtCharts import (
     QChart,
     QChartView,
     QLineSeries,
+    QPieSeries,
     QValueAxis,
 )
 from PySide6.QtCore import Qt, QThread, Signal
@@ -94,18 +95,31 @@ class DashboardPage(QWidget):
             overview_layout.addWidget(card, i // 3, i % 3)
         layout.addWidget(overview_group)
 
-        # 图表区域
-        charts_layout = QHBoxLayout()
+        # 图表区域 - 第一行：趋势 + Provider 分布
+        charts_layout_row1 = QHBoxLayout()
 
         # 每日趋势图
         self.daily_chart = self._create_line_chart("每日请求趋势")
-        charts_layout.addWidget(self.daily_chart)
+        charts_layout_row1.addWidget(self.daily_chart)
 
-        # Provider 分布饼图（用柱状图代替）
-        self.provider_chart = self._create_bar_chart("Provider 分布")
-        charts_layout.addWidget(self.provider_chart)
+        # Provider 分布饼图
+        self.provider_chart = self._create_pie_chart("Provider 分布")
+        charts_layout_row1.addWidget(self.provider_chart)
 
-        layout.addLayout(charts_layout, 1)
+        layout.addLayout(charts_layout_row1, 1)
+
+        # 图表区域 - 第二行：成本趋势 + 压缩节省
+        charts_layout_row2 = QHBoxLayout()
+
+        # 成本趋势图
+        self.cost_chart = self._create_line_chart("每日成本趋势")
+        charts_layout_row2.addWidget(self.cost_chart)
+
+        # 压缩节省图
+        self.savings_chart = self._create_bar_chart("压缩节省 Token")
+        charts_layout_row2.addWidget(self.savings_chart)
+
+        layout.addLayout(charts_layout_row2, 1)
 
         # 底部模型分布表
         model_group = QGroupBox("模型分布")
@@ -142,6 +156,16 @@ class DashboardPage(QWidget):
         return view
 
     def _create_bar_chart(self, title: str) -> QChartView:
+        chart = QChart()
+        chart.setTitle(title)
+        chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
+        chart.legend().setAlignment(Qt.AlignmentFlag.AlignBottom)
+        view = QChartView(chart)
+        view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        view.setMinimumHeight(250)
+        return view
+
+    def _create_pie_chart(self, title: str) -> QChartView:
         chart = QChart()
         chart.setTitle(title)
         chart.setAnimationOptions(QChart.AnimationOption.SeriesAnimations)
@@ -195,6 +219,13 @@ class DashboardPage(QWidget):
 
         # 更新 Provider 分布
         self._update_bar_chart(data.get("by_provider", []))
+        self._update_pie_chart(data.get("by_provider", []))
+
+        # 更新成本趋势图
+        self._update_cost_chart(data.get("daily", []))
+
+        # 更新压缩节省图
+        self._update_savings_chart(data.get("daily", []))
 
         # 更新模型分布
         by_model = data.get("by_model", [])
@@ -247,6 +278,60 @@ class DashboardPage(QWidget):
         axis_x.append(categories)
         axis_y = QValueAxis()
         axis_y.setTitleText("请求数")
+        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
+        chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
+        series.attachAxis(axis_x)
+        series.attachAxis(axis_y)
+
+    def _update_pie_chart(self, by_provider: list[dict[str, Any]]) -> None:
+        chart = self.provider_chart.chart()
+        chart.removeAllSeries()
+
+        series = QPieSeries()
+        for p in by_provider:
+            slice_ = series.append(p.get("provider", ""), p.get("requests", 0))
+            slice_.setLabel(f"{p.get('provider', '')}: {p.get('requests', 0)}")
+            slice_.setLabelVisible(True)
+
+        chart.addSeries(series)
+
+    def _update_cost_chart(self, daily: list[dict[str, Any]]) -> None:
+        chart = self.cost_chart.chart()
+        chart.removeAllSeries()
+
+        series = QLineSeries()
+        series.setName("成本 ($)")
+        for i, d in enumerate(daily):
+            series.append(i, d.get("cost", 0.0))
+
+        chart.addSeries(series)
+        axis_x = QBarCategoryAxis()
+        axis_x.append([d.get("day", "") for d in daily])
+        axis_y = QValueAxis()
+        axis_y.setTitleText("成本 ($)")
+        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
+        chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
+        series.attachAxis(axis_x)
+        series.attachAxis(axis_y)
+
+    def _update_savings_chart(self, daily: list[dict[str, Any]]) -> None:
+        chart = self.savings_chart.chart()
+        chart.removeAllSeries()
+
+        bar_set = QBarSet("节省 Token")
+        categories = []
+        for d in daily:
+            bar_set.append(d.get("saved_tokens", 0))
+            categories.append(d.get("day", ""))
+
+        series = QBarSeries()
+        series.append(bar_set)
+        chart.addSeries(series)
+
+        axis_x = QBarCategoryAxis()
+        axis_x.append(categories)
+        axis_y = QValueAxis()
+        axis_y.setTitleText("节省 Token")
         chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         series.attachAxis(axis_x)

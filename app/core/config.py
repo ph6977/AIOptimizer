@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     compression_model: str = "deepseek-chat"  # 用于 judge 的廉价模型
     max_context_tokens: int = 8192
     target_context_tokens: int = 4096
+    compression_keep_recent: int = 4  # 保留最近 N 条非系统消息不压缩
+    compression_target_ratio: float = 0.5  # 目标压缩比 (compressed/original)
+    compression_min_keep_tokens: int = 500  # 最少保留的 token 数
+
+    # 评估 Judge
+    judge_model: str = "deepseek-chat"
+    judge_api_key: str = ""
+    judge_base_url: str = "https://api.deepseek.com/v1"
 
     # 路由
     routing_enabled: bool = True

@@ -48,15 +48,17 @@ JUDGE_PROMPT = """你是一个严格的 AI 回答质量评估员。请对比两�
 class Evaluator:
     def __init__(
         self,
-        judge_model: str = "deepseek-chat",
+        judge_model: str | None = None,
         gateway_url: str | None = None,
         use_mock: bool = False,
     ) -> None:
-        self.judge_model = judge_model
+        self.judge_model = judge_model or settings.judge_model
         self.gateway_url = (
             gateway_url or f"http://{settings.gateway_host}:{settings.gateway_port}"
         )
         self.use_mock = use_mock
+        self.judge_api_key = settings.judge_api_key
+        self.judge_base_url = settings.judge_base_url
         self.client = httpx.AsyncClient(timeout=60.0)
 
         # 进程内 Mock Provider（若启用）
@@ -314,11 +316,11 @@ class Evaluator:
             adapter = self._create_mock_adapter()
             resp = await adapter.chat_completion(request)
 
-        content = (
-            resp.choices[0].get("message", {}).get("content", "")
-            if isinstance(resp.choices[0], dict)
-            else resp.choices[0].message.content
-        )
+        choice = resp.choices[0]
+        if isinstance(choice, dict):
+            content = choice.get("message", {}).get("content", "")
+        else:
+            content = choice.message.content
         return str(content)
 
     async def judge(
@@ -397,29 +399,59 @@ class Evaluator:
                 "reason": f"Mock multi-dim scoring: A={score_a_detail}, B={score_b_detail}",
             }
 
-        # HTTP 模式（需真实 Judge Key）
-        prompt = JUDGE_PROMPT.format(
-            question=question, answer_a=answer_a, answer_b=answer_b
-        )
-        payload = {
-            "model": self.judge_model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "stream": False,
-        }
-        resp = await self.client.post(
-            f"{self.gateway_url}/v1/chat/completions", json=payload
-        )
-        if resp.status_code != 200:
-            return {"error": resp.text}
-        content = resp.json()["choices"][0]["message"]["content"]
-        try:
-            # 提取 JSON
-            start = content.find("{")
-            end = content.rfind("}") + 1
-            return cast(dict[str, Any], json.loads(content[start:end]))
-        except (json.JSONDecodeError, ValueError) as e:
-            return {"error": f"Parse failed: {e}", "raw": content}
+        # HTTP 模式：优先使用真实 Judge API (DeepSeek)，否则走网关
+        if self.judge_api_key:
+            # 直接调用 DeepSeek API
+            prompt = JUDGE_PROMPT.format(
+                question=question, answer_a=answer_a, answer_b=answer_b
+            )
+            payload = {
+                "model": self.judge_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "stream": False,
+            }
+            headers = {
+                "Authorization": f"Bearer {self.judge_api_key}",
+                "Content-Type": "application/json",
+            }
+            resp = await self.client.post(
+                f"{self.judge_base_url}/chat/completions", json=payload, headers=headers
+            )
+            if resp.status_code != 200:
+                return {"error": resp.text}
+            content = resp.json()["choices"][0]["message"]["content"]
+            try:
+                # 提取 JSON
+                start = content.find("{")
+                end = content.rfind("}") + 1
+                return cast(dict[str, Any], json.loads(content[start:end]))
+            except (json.JSONDecodeError, ValueError) as e:
+                return {"error": f"Parse failed: {e}", "raw": content}
+        else:
+            # 回退到网关
+            prompt = JUDGE_PROMPT.format(
+                question=question, answer_a=answer_a, answer_b=answer_b
+            )
+            payload = {
+                "model": self.judge_model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "stream": False,
+            }
+            resp = await self.client.post(
+                f"{self.gateway_url}/v1/chat/completions", json=payload
+            )
+            if resp.status_code != 200:
+                return {"error": resp.text}
+            content = resp.json()["choices"][0]["message"]["content"]
+            try:
+                # 提取 JSON
+                start = content.find("{")
+                end = content.rfind("}") + 1
+                return cast(dict[str, Any], json.loads(content[start:end]))
+            except (json.JSONDecodeError, ValueError) as e:
+                return {"error": f"Parse failed: {e}", "raw": content}
 
     async def evaluate_case(self, case: EvalCase) -> dict[str, Any]:
         """评估单个用例"""
