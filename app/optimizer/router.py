@@ -253,11 +253,18 @@ class Router:
             if not p.enabled or not p.api_key:
                 continue
             for model_id in p.models:
-                # 从 ProviderFactory 获取 ModelInfo
+                # 从 ProviderFactory 获取 ModelInfo，未知模型用默认值
                 overrides = self.factory._get_model_overrides(p.name)
                 model_info = overrides.get(model_id)
-                if model_info:
-                    results.append((p.name, model_id, model_info))
+                if not model_info:
+                    model_info = ModelInfo(
+                        id=model_id,
+                        display_name=model_id,
+                        context_window=8192,
+                        input_cost_per_1k=0.0,
+                        output_cost_per_1k=0.0,
+                    )
+                results.append((p.name, model_id, model_info))
         return results
 
     def route(

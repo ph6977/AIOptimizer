@@ -48,7 +48,7 @@ DB_PATH: Path | None = None
 async def init_db() -> None:
     """
     初始化数据库：创建目录、表结构和索引
-    
+
     此函数在应用启动时调用一次，确保数据库就绪。
     使用全局变量 DB_PATH 缓存数据库文件路径。
     """
@@ -64,7 +64,7 @@ async def init_db() -> None:
     # aiosqlite 在 Windows 上不支持 file:// URI 格式，需使用原始路径
     db_path_str = str(DB_PATH)
     print(f"[DEBUG] DB_PATH={DB_PATH}, str={db_path_str}")  # 调试输出
-    
+
     async with aiosqlite.connect(db_path_str) as db:
         # 创建用量日志表
         await db.execute("""
@@ -99,16 +99,16 @@ async def init_db() -> None:
 async def get_db() -> AsyncIterator[aiosqlite.Connection]:
     """
     获取数据库连接的异步上下文管理器
-    
+
     用法:
         async with get_db() as db:
             await db.execute(...)
-    
+
     机制:
     - 首次调用时自动初始化数据库
     - 设置 row_factory 为 aiosqlite.Row，支持按列名访问
     - 退出上下文时自动关闭连接
-    
+
     返回:
         AsyncIterator[aiosqlite.Connection]: 异步数据库连接迭代器
     """
@@ -135,7 +135,7 @@ async def log_usage(
 ) -> None:
     """
     记录一次 API 调用的用量信息
-    
+
     参数:
         provider: Provider 名称 (如 'openai', 'deepseek')
         model: 模型名称 (如 'gpt-4o', 'deepseek-chat')
@@ -176,7 +176,7 @@ async def log_usage(
 async def get_usage_stats(days: int = 7) -> dict[str, Any]:
     """
     获取指定天数内的用量统计数据
-    
+
     返回结构:
     {
         "summary": {总请求数, 总token, 总成本, 节省token},
@@ -184,10 +184,10 @@ async def get_usage_stats(days: int = 7) -> dict[str, Any]:
         "by_model": [{model, requests, tokens, cost}, ...],
         "daily": [{day, requests, tokens, cost}, ...]
     }
-    
+
     参数:
         days: 统计天数，默认 7 天
-    
+
     返回:
         包含汇总、分 Provider、分模型、每日趋势的字典
     """

@@ -32,35 +32,35 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ProviderConfig(BaseSettings):
     """
     单个 AI Provider 的配置模型
-    
+
     每个 Provider 代表一个 AI 服务商（如 OpenAI、DeepSeek、Claude 等）。
     所有字段都有默认值，支持通过 .env 或代码动态配置。
     """
-    
+
     name: str
     """Provider 内部标识名，如 'openai', 'deepseek', 'anthropic' 等"""
-    
+
     display_name: str
     """显示名称，用于 UI 显示，如 'OpenAI', 'DeepSeek'"""
-    
+
     api_key: str = ""
     """API 密钥，用于认证，敏感信息建议通过 .env 配置"""
-    
+
     base_url: str = ""
     """API 基础 URL，空字符串表示使用 Provider 的默认地址"""
-    
+
     models: list[str] = Field(default_factory=list)
     """支持的模型列表，如 ['gpt-4o', 'gpt-4o-mini']"""
-    
+
     enabled: bool = True
     """是否启用此 Provider，禁用后不参与路由和模型列表"""
-    
+
     priority: int = 0
     """
     路由优先级，数值越小优先级越高
     用于路由决策时的加分项：优先级越高越容易被选中
     """
-    
+
     extra: dict[str, Any] = Field(default_factory=dict)
     """扩展字段，用于存储 Provider 特有的额外配置"""
 
@@ -68,13 +68,13 @@ class ProviderConfig(BaseSettings):
 class Settings(BaseSettings):
     """
     全局应用设置
-    
+
     使用 Pydantic v2 的 SettingsConfigDict 配置：
     - env_file: 从 .env 文件加载环境变量
     - env_file_encoding: 文件编码为 UTF-8
     - extra='ignore': 忽略未定义的额外字段，防止配置错误
     """
-    
+
     model_config = SettingsConfigDict(
         env_file=".env",  # 配置文件路径
         env_file_encoding="utf-8",  # 编码格式
@@ -84,56 +84,56 @@ class Settings(BaseSettings):
     # ==================== 网关配置 ====================
     gateway_host: str = "127.0.0.1"
     """网关监听地址，默认本地回环，生产环境可改为 0.0.0.0"""
-    
+
     gateway_port: int = 8000
     """网关监听端口，默认 8000"""
-    
+
     gateway_workers: int = 1
     """工作进程数，uvicorn 的 workers 参数，建议生产环境设为 CPU 核心数"""
 
     # ==================== 压缩引擎配置 ====================
     compression_enabled: bool = True
     """是否启用上下文压缩，False 则直接透传原始上下文"""
-    
+
     compression_aggressiveness: float = 0.5
     """
     压缩激进度 (0.0-1.0)，越大压缩越激进
     - 0.0: 保守，只删除明显冗余
     - 1.0: 激进，大幅压缩甚至牺牲部分信息
     """
-    
+
     compression_model: str = "deepseek-chat"
     """用于 LLM Judge 评估的廉价模型名称"""
-    
+
     max_context_tokens: int = 8192
     """最大上下文长度（token 数），超过此值触发压缩"""
-    
+
     target_context_tokens: int = 4096
     """压缩目标 token 数，压缩后上下文不超过此值"""
-    
+
     compression_keep_recent: int = 4
     """保留最近 N 条非系统消息不压缩，保证最近对话完整性"""
-    
+
     compression_target_ratio: float = 0.5
     """目标压缩比，压缩后 token 数 / 原始 token 数，越小压缩越多"""
-    
+
     compression_min_keep_tokens: int = 500
     """最少保留的 token 数，防止过度压缩导致上下文过短"""
 
     # ==================== 评估 Judge 配置 ====================
     judge_model: str = "deepseek-chat"
     """评估时使用的 Judge 模型名称"""
-    
+
     judge_api_key: str = ""
     """Judge 模型的 API Key，配置后直接调用 DeepSeek API 进行评估"""
-    
+
     judge_base_url: str = "https://api.deepseek.com/v1"
     """Judge 模型的 API Base URL"""
 
     # ==================== 智能路由配置 ====================
     routing_enabled: bool = True
     """是否启用智能路由，False 则使用第一个可用 Provider"""
-    
+
     quality_vs_cost: float = 0.5
     """
     质量 vs 成本权重 (0.0-1.0)
@@ -160,7 +160,7 @@ class Settings(BaseSettings):
     def get_providers(self) -> list[ProviderConfig]:
         """
         从 JSON 字符串反序列化 Provider 列表
-        
+
         返回:
             ProviderConfig 对象列表，解析失败返回空列表
         """
@@ -175,7 +175,7 @@ class Settings(BaseSettings):
     def set_providers(self, providers: list[ProviderConfig]) -> None:
         """
         将 Provider 列表序列化为 JSON 字符串存储
-        
+
         参数:
             providers: ProviderConfig 对象列表
         """
@@ -188,10 +188,10 @@ class Settings(BaseSettings):
     def get_data_dir(self) -> Path:
         """
         获取应用数据目录路径
-        
+
         Windows: %APPDATA%\\AIOptimizer
         Linux/macOS: ~/.local/share/AIOptimizer
-        
+
         返回目录 Path 对象，目录不存在会在首次使用时自动创建
         """
         if os.name == "nt":

@@ -2,6 +2,7 @@
 
 import json
 import os
+import traceback
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -125,19 +126,44 @@ def _register_mock_provider() -> None:
     if os.getenv("AIOPTIMIZER_TEST_MODE") != "1":
         return
     from app.core.config import ProviderConfig, settings
-    from app.providers import ProviderFactory
+    from app.providers import ModelInfo, ProviderFactory
 
     original_create = ProviderFactory.create
 
-    def patched_create(cls: Any, provider_config: Any) -> Any:
+    def patched_create(provider_config: Any) -> Any:
         if provider_config.name == "mock":
             key = "mock:mock"
-            if key not in cls._adapters:
-                cls._adapters[key] = MockProviderAdapter()
-            return cls._adapters[key]
+            if key not in ProviderFactory._adapters:
+                ProviderFactory._adapters[key] = MockProviderAdapter()  # type: ignore[assignment]
+            return ProviderFactory._adapters[key]
         return original_create(provider_config)
 
     ProviderFactory.create = patched_create  # type: ignore[assignment]
+
+    # 注册 Mock 模型元数据
+    original_get_overrides = ProviderFactory._get_model_overrides
+
+    def patched_get_overrides(provider: str) -> dict[str, ModelInfo]:
+        if provider == "mock":
+            return {
+                "mock-model": ModelInfo(
+                    id="mock-model",
+                    display_name="Mock Model",
+                    context_window=8192,
+                    input_cost_per_1k=0.0,
+                    output_cost_per_1k=0.0,
+                ),
+                "mock-model-vision": ModelInfo(
+                    id="mock-model-vision",
+                    display_name="Mock Vision Model",
+                    context_window=8192,
+                    input_cost_per_1k=0.0,
+                    output_cost_per_1k=0.0,
+                ),
+            }
+        return original_get_overrides(provider)
+
+    ProviderFactory._get_model_overrides = patched_get_overrides  # type: ignore[assignment]
 
     mock_config = ProviderConfig(
         name="mock",
@@ -149,8 +175,7 @@ def _register_mock_provider() -> None:
         priority=0,
     )
     settings.set_providers([mock_config])
-    print("[Test Mode] Mock Provider registered")
-    print("[Test Mode] Mock Provider registered")
+    print("[Test Mode] Mock Provider + model overrides registered")
 
 
 @asynccontextmanager
@@ -383,7 +408,19 @@ async def chat_completions(request: Request) -> Response:
     except httpx.RequestError as e:
         raise HTTPException(502, f"Upstream unreachable: {e!s}") from e
     except Exception as e:
+        # Log full traceback for debugging
+        print(f"[Gateway ERROR] {traceback.format_exc()}")
         raise HTTPException(500, f"Gateway error: {e!s}") from e
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Global exception handler to ensure proper JSON error responses"""
+    print(f"[Global ERROR] {request.url} - {traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal server error: {exc!s}", "path": str(request.url)},
+    )
 
 
 @app.get("/v1/usage/stats")

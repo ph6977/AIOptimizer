@@ -204,13 +204,17 @@ class DashboardPage(QWidget):
     def _on_stats_ready(self, data: dict[str, Any]) -> None:
         # 更新概览卡片
         summary = data.get("summary", {})
-        self._set_card_value("requests", str(summary.get("requests", 0)))
-        self._set_card_value("total_tokens", f"{summary.get('total_tokens', 0):,}")
-        self._set_card_value("total_cost", f"{summary.get('total_cost', 0):.4f}")
-        self._set_card_value("saved_tokens", f"{summary.get('saved_tokens', 0):,}")
+        requests = summary.get("requests") or 0
+        total_tokens = summary.get("total_tokens") or 0
+        total_cost = summary.get("total_cost") or 0.0
+        saved_tokens = summary.get("saved_tokens") or 0
+        self._set_card_value("requests", str(requests))
+        self._set_card_value("total_tokens", f"{total_tokens:,}")
+        self._set_card_value("total_cost", f"{total_cost:.4f}")
+        self._set_card_value("saved_tokens", f"{saved_tokens:,}")
 
-        total = summary.get("total_tokens", 0)
-        saved = summary.get("saved_tokens", 0)
+        total = total_tokens
+        saved = saved_tokens
         ratio = (saved / total * 100) if total > 0 else 0
         self._set_card_value("saved_ratio", f"{ratio:.1f}%")
 
