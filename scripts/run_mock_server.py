@@ -6,6 +6,8 @@ import subprocess
 import sys
 import time
 
+import httpx
+
 SERVER_SCRIPT = os.path.join(os.path.dirname(__file__), "mock_openai_server.py")
 PORT = 8001
 
@@ -14,12 +16,12 @@ PORT = 8001
 def kill_port(port):
     import subprocess
 
-    result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True)
+    result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, check=False)
     for line in result.stdout.splitlines():
         if f":{port}" in line and "LISTENING" in line:
             parts = line.split()
             pid = parts[-1]
-            subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True)
+            subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True, check=False)
 
 
 kill_port(PORT)
@@ -36,13 +38,11 @@ proc = subprocess.Popen(
 # 等待就绪
 for _ in range(20):
     try:
-        import httpx
-
         r = httpx.get(f"http://127.0.0.1:{PORT}/models", timeout=1)
         if r.status_code == 200:
             print(f"Mock server started on port {PORT}, PID={proc.pid}")
             break
-    except Exception:
+    except httpx.HTTPError:
         time.sleep(0.2)
 else:
     print("Mock server failed to start")
@@ -53,7 +53,7 @@ else:
 def cleanup():
     try:
         proc.terminate()
-    except Exception:
+    except OSError:
         pass
 
 

@@ -24,7 +24,7 @@ from app.core.config import settings  # 全局配置对象
 from app.ui.main_window import MainWindow  # 主窗口类
 
 
-def run_gateway():
+def run_gateway():  
     """
     在后台线程中运行 FastAPI 网关服务
     
