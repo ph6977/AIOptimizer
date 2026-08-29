@@ -38,6 +38,7 @@ eval_reports/
 *.log
 .env
 .env.local
+.mock_server.pid
 
 # Data
 data/

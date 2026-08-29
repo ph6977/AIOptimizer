@@ -2,7 +2,6 @@
 
 from typing import Any
 
-from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -50,10 +49,7 @@ class MainWindow(QMainWindow):
         # 系统托盘
         self._init_tray()
 
-        # 定时刷新面板
-        self.refresh_timer = QTimer()
-        self.refresh_timer.timeout.connect(self._refresh_dashboard)
-        self.refresh_timer.start(5000)  # 5 秒刷新一次
+
 
     def _init_tray(self) -> None:
         self.tray = QSystemTrayIcon(self)
@@ -101,9 +97,6 @@ class MainWindow(QMainWindow):
         settings.compression_enabled = checked
         self.toggle_compress_action.setText("关闭压缩" if checked else "开启压缩")
         self.toast.show(f"压缩已{'开启' if checked else '关闭'}", 2000)
-
-    def _refresh_dashboard(self) -> None:
-        self.dashboard.refresh()
 
     def _quit_app(self) -> None:
         self.tray.hide()

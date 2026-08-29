@@ -69,7 +69,9 @@ class DashboardPage(QWidget):
         control_bar = QHBoxLayout()
         control_bar.addWidget(QLabel("统计周期:"))
         self.period_combo = QComboBox()
+        self.period_combo.blockSignals(True)
         self.period_combo.addItems(["7 天", "30 天", "90 天"])
+        self.period_combo.blockSignals(False)
         self.period_combo.currentTextChanged.connect(self.refresh)
         control_bar.addWidget(self.period_combo)
         control_bar.addStretch()
@@ -245,9 +247,15 @@ class DashboardPage(QWidget):
     def _on_stats_error(self, err: str) -> None:
         QMessageBox.warning(self, "统计失败", f"获取统计失败: {err}")
 
+    @staticmethod
+    def _remove_all_axes(chart: QChart) -> None:
+        for axis in chart.axes():
+            chart.removeAxis(axis)
+
     def _update_line_chart(self, daily: list[dict[str, Any]]) -> None:
         chart = self.daily_chart.chart()
         chart.removeAllSeries()
+        self._remove_all_axes(chart)
 
         series = QLineSeries()
         series.setName("请求数")
@@ -267,6 +275,7 @@ class DashboardPage(QWidget):
     def _update_bar_chart(self, by_provider: list[dict[str, Any]]) -> None:
         chart = self.provider_chart.chart()
         chart.removeAllSeries()
+        self._remove_all_axes(chart)
 
         bar_set = QBarSet("请求数")
         categories = []
@@ -290,6 +299,7 @@ class DashboardPage(QWidget):
     def _update_pie_chart(self, by_provider: list[dict[str, Any]]) -> None:
         chart = self.provider_chart.chart()
         chart.removeAllSeries()
+        self._remove_all_axes(chart)
 
         series = QPieSeries()
         for p in by_provider:
@@ -302,6 +312,7 @@ class DashboardPage(QWidget):
     def _update_cost_chart(self, daily: list[dict[str, Any]]) -> None:
         chart = self.cost_chart.chart()
         chart.removeAllSeries()
+        self._remove_all_axes(chart)
 
         series = QLineSeries()
         series.setName("成本 ($)")
@@ -321,6 +332,7 @@ class DashboardPage(QWidget):
     def _update_savings_chart(self, daily: list[dict[str, Any]]) -> None:
         chart = self.savings_chart.chart()
         chart.removeAllSeries()
+        self._remove_all_axes(chart)
 
         bar_set = QBarSet("节省 Token")
         categories = []
