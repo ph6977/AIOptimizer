@@ -26,19 +26,17 @@ class TransparencyWorker(QThread):
     finished = Signal(list)
     error = Signal(str)
 
-    def __init__(self, limit: int = 50) -> None:
+    def __init__(self, limit: int = 100) -> None:
         super().__init__()
         self.limit = limit
 
     def run(self) -> None:
         try:
-            url = (
-                f"http://{settings.gateway_host}:{settings.gateway_port}/v1/usage/stats"
-            )
-            resp = httpx.get(url, params={"days": 1}, timeout=10.0)
+            url = f"http://{settings.gateway_host}:{settings.gateway_port}/v1/compression/details"
+            resp = httpx.get(url, params={"limit": self.limit}, timeout=10.0)
             if resp.status_code == 200:
-                # 简化：返回空，实际需要专门的压缩详情 API
-                self.finished.emit([])
+                data = resp.json()
+                self.finished.emit(data.get("details", []))
             else:
                 self.error.emit(f"HTTP {resp.status_code}")
         except httpx.HTTPError as e:
@@ -145,65 +143,33 @@ class TransparencyPage(QWidget):
         self.worker.start()
 
     def _on_data_ready(self, data: list[Any]) -> None:
-        # 这里简化：生成演示数据
-        self._load_demo_data()
-
-    def _on_error(self, err: str) -> None:
-        QMessageBox.warning(self, "错误", f"获取失败: {err}")
-
-    def _load_demo_data(self) -> None:
-        """加载演示数据（实际应从 API 获取压缩详情）"""
         self.tree.clear()
         self.current_items = []
 
-        demo_decisions = [
-            ("system", "keep", "系统提示词", 156, 0, "You are a helpful assistant..."),
-            (
-                "user",
-                "keep",
-                "包含代码关键词",
-                89,
-                0,
-                "请帮我写一个 Python 函数计算斐波那契数列",
-            ),
-            (
-                "assistant",
-                "keep",
-                "包含代码",
-                234,
-                0,
-                "def fib(n):\n    if n <= 1: return n\n    return fib(n-1) + fib(n-2)",
-            ),
-            (
-                "user",
-                "summarize",
-                "长文本非关键",
-                567,
-                423,
-                "这是一段很长的对话内容，主要讨论了项目架构、技术选型、团队分工等非核心技术细节...",
-            ),
-            (
-                "assistant",
-                "summarize",
-                "长文本非关键",
-                445,
-                312,
-                "建议采用微服务架构，使用 Docker 容器化部署，CI/CD 流水线...",
-            ),
-            ("user", "drop", "纯寒暄", 12, 12, "好的，谢谢！"),
-            ("assistant", "drop", "纯确认", 8, 8, "不客气！"),
-        ]
+        if not data:
+            self.summary_label.setText("暂无压缩决策数据（需要先发起带压缩的请求）")
+            return
 
         kept = summarized = dropped = saved_total = 0
 
-        for role, action, reason, tokens, saved, content in demo_decisions:
+        for record in data:
+            role = record.get("role", "unknown")
+            action = record.get("action", "keep")
+            reason = record.get("reason", "")
+            original_tokens = record.get("original_tokens", 0)
+            saved_tokens = record.get("saved_tokens", 0)
+            original_content = record.get("original_content", "")
+            summary_content = record.get("summary_content", "")
+
+            display_text = f"[{role}] {original_content[:60]}{'...' if len(original_content) > 60 else ''}"
+
             item = QTreeWidgetItem(
                 [
-                    f"[{role}] {content[:60]}{'...' if len(content) > 60 else ''}",
+                    display_text,
                     action.upper(),
                     reason,
-                    str(tokens),
-                    f"+{saved}" if saved else "0",
+                    str(original_tokens),
+                    f"+{saved_tokens}" if saved_tokens else "0",
                 ]
             )
             item.setData(
@@ -213,12 +179,10 @@ class TransparencyPage(QWidget):
                     "role": role,
                     "action": action,
                     "reason": reason,
-                    "tokens": tokens,
-                    "saved": saved,
-                    "original": content,
-                    "summary": (
-                        f"[摘要] {content[:200]}..." if action == "summarize" else None
-                    ),
+                    "original_tokens": original_tokens,
+                    "saved_tokens": saved_tokens,
+                    "original": original_content,
+                    "summary": summary_content,
                 },
             )
             self.tree.addTopLevelItem(item)
@@ -230,10 +194,10 @@ class TransparencyPage(QWidget):
                 summarized += 1
             elif action == "drop":
                 dropped += 1
-            saved_total += saved
+            saved_total += saved_tokens
 
         self.summary_label.setText(
-            f"总计: {len(demo_decisions)} 条, 保留: {kept}, 摘要: {summarized}, 丢弃: {dropped}, 节省: {saved_total} tokens"
+            f"总计: {len(data)} 条, 保留: {kept}, 摘要: {summarized}, 丢弃: {dropped}, 节省: {saved_total} tokens"
         )
 
         # 颜色标记
@@ -250,6 +214,9 @@ class TransparencyPage(QWidget):
             elif action == "DROP":
                 item.setBackground(1, Qt.GlobalColor.red)
 
+    def _on_error(self, err: str) -> None:
+        QMessageBox.warning(self, "错误", f"获取失败: {err}")
+
     def _on_item_clicked(self, item: QTreeWidgetItem, column: int) -> None:
         data = item.data(0, Qt.ItemDataRole.UserRole)
         if not data:
@@ -261,8 +228,8 @@ class TransparencyPage(QWidget):
         detail = f"""角色: {data['role']}
 动作: {data['action'].upper()}
 原因: {data['reason']}
-Token: {data['tokens']}
-节省: {data['saved']}
+原始 Token: {data['original_tokens']}
+节省 Token: {data['saved_tokens']}
 
 {'='*50}
 原文内容:

@@ -3,7 +3,7 @@
 import json
 
 import httpx
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -31,13 +32,11 @@ class SessionsWorker(QThread):
 
     def run(self) -> None:
         try:
-            url = (
-                f"http://{settings.gateway_host}:{settings.gateway_port}/v1/usage/stats"
-            )
-            resp = httpx.get(url, params={"days": self.days}, timeout=10.0)
+            url = f"http://{settings.gateway_host}:{settings.gateway_port}/v1/sessions"
+            resp = httpx.get(url, params={"days": self.days, "limit": self.limit}, timeout=10.0)
             if resp.status_code == 200:
-                # 这里简化：实际应有专门的会话查询 API
-                self.finished.emit([])
+                data = resp.json()
+                self.finished.emit(data.get("sessions", []))
             else:
                 self.error.emit(f"HTTP {resp.status_code}")
         except httpx.HTTPError as e:
@@ -48,20 +47,25 @@ class SessionsPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self._init_ui()
+        self.refresh()
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         # 顶部控制栏
         control = QHBoxLayout()
-        control.addWidget(QLabel("会话管理 (数据来源: 用量日志)"))
+        control.addWidget(QLabel("会话管理"))
 
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("搜索会话/请求ID...")
+        self.search_edit.setPlaceholderText("搜索会话ID...")
         self.search_edit.setMaximumWidth(300)
         control.addWidget(self.search_edit)
 
-        export_btn = QPushButton("📤 导出选中会话")
+        self.refresh_btn = QPushButton("🔄 刷新")
+        self.refresh_btn.clicked.connect(self.refresh)
+        control.addWidget(self.refresh_btn)
+
+        export_btn = QPushButton("📤 导出会话")
         export_btn.clicked.connect(self._export_sessions)
         control.addWidget(export_btn)
 
@@ -69,9 +73,9 @@ class SessionsPage(QWidget):
 
         # 会话表格
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(
-            ["时间", "Provider", "模型", "请求数", "总 Tokens", "成本", "节省率"]
+            ["会话 ID", "请求数", "总 Tokens", "成本", "节省 Tokens", "Provider", "模型", "最后活动"]
         )
         self.table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
@@ -81,26 +85,56 @@ class SessionsPage(QWidget):
         layout.addWidget(self.table)
 
         # 底部状态
-        self.status_label = QLabel("暂无会话数据（需实现 /v1/sessions API）")
+        self.status_label = QLabel("加载中...")
         self.status_label.setStyleSheet("color: #666; padding: 8px;")
         layout.addWidget(self.status_label)
 
-        # 占位提示
-        placeholder = QLabel("""
-        <div style='text-align:center; color:#999; padding:40px;'>
-            <h3>📝 会话管理功能待完善</h3>
-            <p>需要后端实现 <code>/v1/sessions</code> API 以支持：</p>
-            <ul style='text-align:left; display:inline-block;'>
-                <li>按会话 ID 分组查询</li>
-                <li>会话详情：完整对话历史、压缩详情、质量分</li>
-                <li>书签/标签管理</li>
-                <li>导出 Markdown/JSON</li>
-            </ul>
-        </div>
-        """)
-        placeholder.setWordWrap(True)
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(placeholder)
+    def refresh(self) -> None:
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("刷新中...")
+        self.worker = SessionsWorker(days=7, limit=50)
+        self.worker.finished.connect(self._on_data_ready)
+        self.worker.error.connect(self._on_error)
+        self.worker.finished.connect(lambda _: self._reset_refresh_btn())
+        self.worker.start()
+
+    def _reset_refresh_btn(self) -> None:
+        self.refresh_btn.setEnabled(True)
+        self.refresh_btn.setText("🔄 刷新")
+
+    def _on_data_ready(self, sessions: list) -> None:
+        self.table.setRowCount(0)
+
+        if not sessions:
+            self.status_label.setText("暂无会话数据（需要先发起 API 请求）")
+            return
+
+        for session in sessions:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            session_id = session.get("session_id", "")[:12] + "..."
+            request_count = str(session.get("request_count", 0))
+            total_tokens = f"{session.get('total_tokens', 0):,}"
+            total_cost = f"${session.get('total_cost', 0):.4f}"
+            saved_tokens = f"{session.get('saved_tokens', 0):,}"
+            providers = session.get("providers", "")
+            models = session.get("models", "")
+            last_request = session.get("last_request", "")[:19]
+
+            self.table.setItem(row, 0, QTableWidgetItem(session_id))
+            self.table.setItem(row, 1, QTableWidgetItem(request_count))
+            self.table.setItem(row, 2, QTableWidgetItem(total_tokens))
+            self.table.setItem(row, 3, QTableWidgetItem(total_cost))
+            self.table.setItem(row, 4, QTableWidgetItem(saved_tokens))
+            self.table.setItem(row, 5, QTableWidgetItem(providers))
+            self.table.setItem(row, 6, QTableWidgetItem(models))
+            self.table.setItem(row, 7, QTableWidgetItem(last_request))
+
+        self.status_label.setText(f"共 {len(sessions)} 个会话")
+
+    def _on_error(self, err: str) -> None:
+        self.status_label.setText(f"加载失败: {err}")
 
     def _export_sessions(self) -> None:
         rows = {item.row() for item in self.table.selectedItems()}
@@ -114,7 +148,7 @@ class SessionsPage(QWidget):
         if not path:
             return
 
-        # 简化导出
+        # 导出数据
         data = []
         for row in sorted(rows):
             row_data = {}
@@ -130,7 +164,7 @@ class SessionsPage(QWidget):
                 with open(path, "w", encoding="utf-8") as f:
                     f.write("# 会话导出\n\n")
                     for d in data:
-                        f.write(f"## {d.get('时间', '')}\n")
+                        f.write(f"## 会话 {d.get('会话 ID', '')}\n")
                         f.writelines(f"- **{k}**: {v}\n" for k, v in d.items())
                         f.write("\n")
             else:

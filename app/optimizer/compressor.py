@@ -300,12 +300,24 @@ class Compressor:
             "dropped": dropped_count,
             "details": [
                 {
+                    "message_index": i,
                     "role": mw.original.role,
                     "action": mw.decision.action,
                     "reason": mw.decision.reason,
-                    "tokens": mw.tokens,
+                    "original_tokens": mw.tokens,
+                    "saved_tokens": (
+                        mw.tokens
+                        if mw.decision.action == "drop"
+                        else (mw.tokens // 3 if mw.decision.action == "summarize" else 0)
+                    ),
+                    "original_content": mw.original.content,
+                    "summary_content": mw.decision.summary or (
+                        f"[摘要] {mw.original.content[:200]}..."
+                        if mw.decision.action == "summarize"
+                        else None
+                    ),
                 }
-                for mw in decisions
+                for i, mw in enumerate(decisions)
             ],
         }
 

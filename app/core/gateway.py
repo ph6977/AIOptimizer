@@ -1,5 +1,6 @@
 """FastAPI 网关：OpenAI 兼容代理 + 优化管线"""
 
+import asyncio
 import json
 import os
 import traceback
@@ -14,7 +15,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.core.config import ProviderConfig, settings
-from app.core.db import init_db, log_usage
+from app.core.db import (
+    get_compression_details,
+    get_quality_scores,
+    get_sessions,
+    init_db,
+    log_compression_decisions,
+    log_quality_score,
+    log_usage,
+)
+from app.eval.quality import evaluate_quality_pair
 from app.optimizer.compressor import compressor
 from app.optimizer.prompt_enhancer import prompt_enhancer
 from app.optimizer.router import RoutingDecision, router
@@ -286,6 +296,13 @@ async def chat_completions(request: Request) -> Response:
             target_tokens=settings.target_context_tokens,
             max_context_tokens=settings.max_context_tokens,
         )
+        # 记录压缩决策到数据库
+        if compression_stats.get("details"):
+            await log_compression_decisions(
+                request_id=request_id,
+                session_id=session_id,
+                decisions=compression_stats["details"],
+            )
         chat_request.messages = compressed_messages
 
     # 2. 智能路由
@@ -383,6 +400,46 @@ async def chat_completions(request: Request) -> Response:
                 session_id=session_id,
             )
 
+            # 异步评估质量（不阻塞响应）
+            async def _eval_quality() -> None:
+                try:
+                    # 获取用户问题
+                    question = ""
+                    for m in reversed(chat_request.messages):
+                        if m.role == "user":
+                            question = m.content
+                            break
+
+                    # 获取回答内容
+                    choice = response.choices[0] if response.choices else None
+                    answer = ""
+                    if choice:
+                        if isinstance(choice, dict):
+                            answer = choice.get("message", {}).get("content", "")
+                        else:
+                            answer = choice.message.content
+
+                    if question and answer:
+                        quality_result = await evaluate_quality_pair(
+                            question=question,
+                            answer_original=answer,
+                            answer_compressed=answer,
+                            request_id=request_id,
+                            session_id=session_id,
+                        )
+                        await log_quality_score(
+                            request_id=request_id,
+                            session_id=session_id,
+                            score_original=quality_result.get("score_original"),
+                            score_compressed=quality_result.get("score_compressed"),
+                            winner=quality_result.get("winner", "tie"),
+                            reason=quality_result.get("reason", ""),
+                        )
+                except (ValueError, KeyError, TypeError) as e:
+                    print(f"[Quality Eval ERROR] {e}")
+
+            asyncio.create_task(_eval_quality())
+
             # 添加优化元信息到响应
             response_dict = response.__dict__.copy()
             response_dict["optimization"] = {
@@ -471,3 +528,35 @@ async def update_config(config: dict[str, Any]) -> dict[str, str]:
         if hasattr(settings, key):
             setattr(settings, key, value)
     return {"status": "ok", "message": "Config updated (runtime only)"}
+
+
+@app.get("/v1/compression/details")
+async def compression_details(
+    request_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """查询压缩决策详情"""
+    details = await get_compression_details(request_id, session_id, limit)
+    return {"details": details, "total": len(details)}
+
+
+@app.get("/v1/quality/scores")
+async def quality_scores(
+    request_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """查询质量评估记录"""
+    scores = await get_quality_scores(request_id, session_id, limit)
+    return {"scores": scores, "total": len(scores)}
+
+
+@app.get("/v1/sessions")
+async def sessions(
+    days: int = 7,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """查询会话列表"""
+    session_list = await get_sessions(days, limit)
+    return {"sessions": session_list, "total": len(session_list)}

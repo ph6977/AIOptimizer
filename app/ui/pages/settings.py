@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import ProviderConfig, settings
+from app.ui.widgets.toast import ToastManager
 
 
 class ProviderRowData:
@@ -43,6 +44,7 @@ class SettingsPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.provider_rows: list[int] = []
+        self.toast = ToastManager(self)
         self._init_ui()
         self.load_config()
 
@@ -70,16 +72,20 @@ class SettingsPage(QWidget):
         compress_group = QGroupBox("上下文压缩")
         compress_form = QFormLayout(compress_group)
         self.compress_enabled = QCheckBox("启用压缩")
+        self.compress_enabled.toggled.connect(self._on_compression_toggled)
         self.aggressiveness = QDoubleSpinBox()
         self.aggressiveness.setRange(0.0, 1.0)
         self.aggressiveness.setSingleStep(0.1)
         self.aggressiveness.setDecimals(1)
+        self.aggressiveness.valueChanged.connect(self._on_aggressiveness_changed)
         self.max_context = QSpinBox()
         self.max_context.setRange(1024, 100000)
         self.max_context.setSingleStep(1024)
+        self.max_context.valueChanged.connect(self._on_max_context_changed)
         self.target_context = QSpinBox()
         self.target_context.setRange(512, 50000)
         self.target_context.setSingleStep(512)
+        self.target_context.valueChanged.connect(self._on_target_context_changed)
         compress_form.addRow(self.compress_enabled)
         compress_form.addRow("压缩激进度 (0-1):", self.aggressiveness)
         compress_form.addRow("最大上下文:", self.max_context)
@@ -219,6 +225,23 @@ class SettingsPage(QWidget):
             ]
             for d in defaults:
                 self._add_provider_row(ProviderRowData(*d))
+
+    def _on_compression_toggled(self, checked: bool) -> None:
+        """压缩开关实时生效"""
+        settings.compression_enabled = checked
+        self.toast.show(f"压缩已{'开启' if checked else '关闭'}", 1000)
+
+    def _on_aggressiveness_changed(self, value: float) -> None:
+        """压缩激进度实时生效"""
+        settings.compression_aggressiveness = value
+
+    def _on_max_context_changed(self, value: int) -> None:
+        """最大上下文实时生效"""
+        settings.max_context_tokens = value
+
+    def _on_target_context_changed(self, value: int) -> None:
+        """目标上下文实时生效"""
+        settings.target_context_tokens = value
 
     def _add_provider_row(self, data: ProviderRowData | None = None) -> None:
         row = self.provider_table.rowCount()

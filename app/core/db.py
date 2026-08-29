@@ -10,26 +10,9 @@
 - 数据库文件存储在用户数据目录（Windows: %APPDATA%\\AIOptimizer）
 - 表结构设计：
   - usage_logs: 记录每次 API 调用的详细用量信息
+  - compression_logs: 记录每条消息的压缩决策详情
+  - quality_scores: 记录每次请求的质量评估结果
   - 索引优化：按时间戳和会话 ID 建立索引，加速统计查询
-
-表结构 (usage_logs):
-- id: 自增主键
-- timestamp: 记录时间戳（自动默认当前时间）
-- provider: Provider 名称
-- model: 模型名称
-- request_tokens: 请求 token 数
-- response_tokens: 响应 token 数
-- total_tokens: 总 token 数
-- cost_usd: 估算成本（美元）
-- compressed: 是否启用了压缩
-- original_tokens: 压缩前原始 token 数
-- saved_tokens: 节省的 token 数
-- request_id: 请求唯一标识（用于关联请求/响应）
-- session_id: 会话 ID（用于会话级统计）
-
-索引：
-- idx_usage_timestamp: 按时间戳查询优化
-- idx_usage_session: 按会话 ID 查询优化
 """
 
 from collections.abc import AsyncIterator
@@ -69,19 +52,19 @@ async def init_db() -> None:
         # 创建用量日志表
         await db.execute("""
             CREATE TABLE IF NOT EXISTS usage_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,  -- 自增主键
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,  -- 记录时间
-                provider TEXT NOT NULL,                    -- Provider 名称
-                model TEXT NOT NULL,                       -- 模型名称
-                request_tokens INTEGER NOT NULL,           -- 请求 token 数
-                response_tokens INTEGER NOT NULL,          -- 响应 token 数
-                total_tokens INTEGER NOT NULL,             -- 总 token 数
-                cost_usd REAL DEFAULT 0,                   -- 估算成本(美元)
-                compressed BOOLEAN DEFAULT 0,              -- 是否压缩
-                original_tokens INTEGER DEFAULT 0,         -- 压缩前 token 数
-                saved_tokens INTEGER DEFAULT 0,            -- 节省 token 数
-                request_id TEXT,                           -- 请求 ID
-                session_id TEXT                            -- 会话 ID
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                request_tokens INTEGER NOT NULL,
+                response_tokens INTEGER NOT NULL,
+                total_tokens INTEGER NOT NULL,
+                cost_usd REAL DEFAULT 0,
+                compressed BOOLEAN DEFAULT 0,
+                original_tokens INTEGER DEFAULT 0,
+                saved_tokens INTEGER DEFAULT 0,
+                request_id TEXT,
+                session_id TEXT
             )
         """)
         # 创建时间戳索引，优化按时间范围查询
@@ -92,6 +75,51 @@ async def init_db() -> None:
         await db.execute("""
             CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_logs(session_id)
         """)
+
+        # 创建压缩决策日志表
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS compression_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL,
+                session_id TEXT,
+                message_index INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                action TEXT NOT NULL,
+                reason TEXT,
+                original_tokens INTEGER DEFAULT 0,
+                saved_tokens INTEGER DEFAULT 0,
+                original_content TEXT,
+                summary_content TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compression_request ON compression_logs(request_id)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compression_session ON compression_logs(session_id)
+        """)
+
+        # 创建质量评估表
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS quality_scores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_id TEXT NOT NULL,
+                session_id TEXT,
+                score_original INTEGER,
+                score_compressed INTEGER,
+                winner TEXT,
+                reason TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_quality_request ON quality_scores(request_id)
+        """)
+        await db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_quality_session ON quality_scores(session_id)
+        """)
+
         await db.commit()
 
 
@@ -161,9 +189,9 @@ async def log_usage(
                 model,
                 request_tokens,
                 response_tokens,
-                request_tokens + response_tokens,  # 总 token = 请求 + 响应
+                request_tokens + response_tokens,
                 cost_usd,
-                1 if compressed else 0,  # SQLite 无布尔类型，用 0/1 存储
+                1 if compressed else 0,
                 original_tokens,
                 saved_tokens,
                 request_id,
@@ -171,6 +199,191 @@ async def log_usage(
             ),
         )
         await db.commit()
+
+
+async def log_compression_decisions(
+    request_id: str,
+    session_id: str,
+    decisions: list[dict[str, Any]],
+) -> None:
+    """
+    记录压缩决策详情
+
+    参数:
+        request_id: 请求唯一标识
+        session_id: 会话 ID
+        decisions: 压缩决策列表，每项包含:
+            - message_index: 消息索引
+            - role: 消息角色
+            - action: 动作 (keep/summarize/drop)
+            - reason: 分类原因
+            - original_tokens: 原始 token 数
+            - saved_tokens: 节省 token 数
+            - original_content: 原文内容
+            - summary_content: 摘要内容
+    """
+    async with get_db() as db:
+        for i, d in enumerate(decisions):
+            await db.execute(
+                """
+                INSERT INTO compression_logs
+                (request_id, session_id, message_index, role, action, reason,
+                 original_tokens, saved_tokens, original_content, summary_content)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    request_id,
+                    session_id,
+                    d.get("message_index", i),
+                    d.get("role", ""),
+                    d.get("action", "keep"),
+                    d.get("reason", ""),
+                    d.get("original_tokens", 0),
+                    d.get("saved_tokens", 0),
+                    d.get("original_content", ""),
+                    d.get("summary_content", ""),
+                ),
+            )
+        await db.commit()
+
+
+async def log_quality_score(
+    request_id: str,
+    session_id: str,
+    score_original: int | None = None,
+    score_compressed: int | None = None,
+    winner: str = "tie",
+    reason: str = "",
+) -> None:
+    """
+    记录质量评估结果
+
+    参数:
+        request_id: 请求唯一标识
+        session_id: 会话 ID
+        score_original: 无压缩回答得分 (1-5)
+        score_compressed: 有压缩回答得分 (1-5)
+        winner: 胜者 (A/B/tie)
+        reason: 评估理由
+    """
+    async with get_db() as db:
+        await db.execute(
+            """
+            INSERT INTO quality_scores
+            (request_id, session_id, score_original, score_compressed, winner, reason)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (request_id, session_id, score_original, score_compressed, winner, reason),
+        )
+        await db.commit()
+
+
+async def get_compression_details(
+    request_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """
+    查询压缩决策详情
+
+    参数:
+        request_id: 按请求 ID 过滤
+        session_id: 按会话 ID 过滤
+        limit: 返回条数限制
+
+    返回:
+        压缩决策列表
+    """
+    async with get_db() as db:
+        query = "SELECT * FROM compression_logs WHERE 1=1"
+        params: list[Any] = []
+
+        if request_id:
+            query += " AND request_id = ?"
+            params.append(request_id)
+        if session_id:
+            query += " AND session_id = ?"
+            params.append(session_id)
+
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = await db.execute_fetchall(query, params)
+        return [dict(r) for r in rows]
+
+
+async def get_quality_scores(
+    request_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """
+    查询质量评估记录
+
+    参数:
+        request_id: 按请求 ID 过滤
+        session_id: 按会话 ID 过滤
+        limit: 返回条数限制
+
+    返回:
+        质量评估记录列表
+    """
+    async with get_db() as db:
+        query = "SELECT * FROM quality_scores WHERE 1=1"
+        params: list[Any] = []
+
+        if request_id:
+            query += " AND request_id = ?"
+            params.append(request_id)
+        if session_id:
+            query += " AND session_id = ?"
+            params.append(session_id)
+
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = await db.execute_fetchall(query, params)
+        return [dict(r) for r in rows]
+
+
+async def get_sessions(
+    days: int = 7,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """
+    查询会话列表（按 session_id 分组）
+
+    参数:
+        days: 查询天数
+        limit: 返回会话数限制
+
+    返回:
+        会话列表，每个会话包含汇总信息
+    """
+    async with get_db() as db:
+        rows = await db.execute_fetchall(
+            """
+            SELECT
+                session_id,
+                COUNT(*) as request_count,
+                SUM(total_tokens) as total_tokens,
+                SUM(cost_usd) as total_cost,
+                SUM(CASE WHEN compressed THEN saved_tokens ELSE 0 END) as saved_tokens,
+                MIN(timestamp) as first_request,
+                MAX(timestamp) as last_request,
+                GROUP_CONCAT(DISTINCT provider) as providers,
+                GROUP_CONCAT(DISTINCT model) as models
+            FROM usage_logs
+            WHERE timestamp >= datetime('now', ?)
+              AND session_id IS NOT NULL
+              AND session_id != ''
+            GROUP BY session_id
+            ORDER BY last_request DESC
+            LIMIT ?
+            """,
+            (f"-{days} days", limit),
+        )
+        return [dict(r) for r in rows]
 
 
 async def get_usage_stats(days: int = 7) -> dict[str, Any]:
