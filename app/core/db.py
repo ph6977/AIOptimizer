@@ -76,6 +76,17 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_logs(session_id)
         """)
 
+        # P2: 新增 tags / bookmarked 字段（兼容已有表）
+        for col_sql in [
+            "ALTER TABLE usage_logs ADD COLUMN tags TEXT DEFAULT ''",
+            "ALTER TABLE usage_logs ADD COLUMN bookmarked BOOLEAN DEFAULT 0",
+            "ALTER TABLE compression_logs ADD COLUMN info_type TEXT DEFAULT 'other'",
+        ]:
+            try:
+                await db.execute(col_sql)
+            except Exception:  # noqa: BLE001, S110 — 列已存在时 SQLite 抛 OperationalError
+                pass
+
         # 创建压缩决策日志表
         await db.execute("""
             CREATE TABLE IF NOT EXISTS compression_logs (
@@ -85,6 +96,7 @@ async def init_db() -> None:
                 message_index INTEGER NOT NULL,
                 role TEXT NOT NULL,
                 action TEXT NOT NULL,
+                info_type TEXT DEFAULT 'other',
                 reason TEXT,
                 original_tokens INTEGER DEFAULT 0,
                 saved_tokens INTEGER DEFAULT 0,
@@ -227,9 +239,9 @@ async def log_compression_decisions(
             await db.execute(
                 """
                 INSERT INTO compression_logs
-                (request_id, session_id, message_index, role, action, reason,
+                (request_id, session_id, message_index, role, action, info_type, reason,
                  original_tokens, saved_tokens, original_content, summary_content)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request_id,
@@ -237,6 +249,7 @@ async def log_compression_decisions(
                     d.get("message_index", i),
                     d.get("role", ""),
                     d.get("action", "keep"),
+                    d.get("info_type", "other"),
                     d.get("reason", ""),
                     d.get("original_tokens", 0),
                     d.get("saved_tokens", 0),
@@ -372,7 +385,9 @@ async def get_sessions(
                 MIN(timestamp) as first_request,
                 MAX(timestamp) as last_request,
                 GROUP_CONCAT(DISTINCT provider) as providers,
-                GROUP_CONCAT(DISTINCT model) as models
+                GROUP_CONCAT(DISTINCT model) as models,
+                MAX(bookmarked) as bookmarked,
+                MAX(tags) as tags
             FROM usage_logs
             WHERE timestamp >= datetime('now', ?)
               AND session_id IS NOT NULL
@@ -473,3 +488,58 @@ async def get_usage_stats(days: int = 7) -> dict[str, Any]:
             "by_model": [dict(r) for r in by_model],
             "daily": [dict(r) for r in daily],
         }
+
+
+async def toggle_bookmark(session_id: str) -> bool:
+    """切换会话书签状态，返回切换后的状态"""
+    async with get_db() as db:
+        row = await db.execute_fetchall(
+            "SELECT bookmarked FROM usage_logs WHERE session_id = ? LIMIT 1",
+            (session_id,),
+        )
+        if not row:
+            return False
+        current = dict(row[0]).get("bookmarked", 0)
+        new_val = 0 if current else 1
+        await db.execute(
+            "UPDATE usage_logs SET bookmarked = ? WHERE session_id = ?",
+            (new_val, session_id),
+        )
+        await db.commit()
+        return bool(new_val)
+
+
+async def set_session_tags(session_id: str, tags: str) -> None:
+    """设置会话标签（逗号分隔）"""
+    async with get_db() as db:
+        await db.execute(
+            "UPDATE usage_logs SET tags = ? WHERE session_id = ?",
+            (tags, session_id),
+        )
+        await db.commit()
+
+
+async def get_bookmarked_sessions() -> list[dict[str, Any]]:
+    """获取所有已书签的会话"""
+    async with get_db() as db:
+        rows = await db.execute_fetchall(
+            """
+            SELECT
+                session_id,
+                COUNT(*) as request_count,
+                SUM(total_tokens) as total_tokens,
+                SUM(cost_usd) as total_cost,
+                SUM(CASE WHEN compressed THEN saved_tokens ELSE 0 END) as saved_tokens,
+                MIN(timestamp) as first_request,
+                MAX(timestamp) as last_request,
+                GROUP_CONCAT(DISTINCT provider) as providers,
+                GROUP_CONCAT(DISTINCT model) as models,
+                MAX(bookmarked) as bookmarked,
+                MAX(tags) as tags
+            FROM usage_logs
+            WHERE bookmarked = 1
+            GROUP BY session_id
+            ORDER BY last_request DESC
+            """
+        )
+        return [dict(r) for r in rows]

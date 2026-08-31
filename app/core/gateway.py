@@ -23,6 +23,8 @@ from app.core.db import (
     log_compression_decisions,
     log_quality_score,
     log_usage,
+    set_session_tags,
+    toggle_bookmark,
 )
 from app.eval.quality import evaluate_quality_pair
 from app.optimizer.compressor import compressor
@@ -588,3 +590,19 @@ async def sessions(
     """查询会话列表"""
     session_list = await get_sessions(days, limit)
     return {"sessions": session_list, "total": len(session_list)}
+
+
+@app.post("/v1/sessions/{session_id}/bookmark")
+async def bookmark_session(session_id: str) -> dict[str, Any]:
+    """切换会话书签状态"""
+    new_state = await toggle_bookmark(session_id)
+    return {"session_id": session_id, "bookmarked": new_state}
+
+
+@app.post("/v1/sessions/{session_id}/tags")
+async def update_session_tags(request: Request, session_id: str) -> dict[str, Any]:
+    """设置会话标签"""
+    body = await request.json()
+    tags = body.get("tags", "")
+    await set_session_tags(session_id, tags)
+    return {"session_id": session_id, "tags": tags}

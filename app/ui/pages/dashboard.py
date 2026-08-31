@@ -42,14 +42,19 @@ class StatsWorker(QThread):
 
     def run(self) -> None:
         try:
-            url = (
-                f"http://{settings.gateway_host}:{settings.gateway_port}/v1/usage/stats"
+            base = f"http://{settings.gateway_host}:{settings.gateway_port}"
+            # 用量统计
+            resp_stats = httpx.get(
+                f"{base}/v1/usage/stats", params={"days": self.days}, timeout=5.0
             )
-            resp = httpx.get(url, params={"days": self.days}, timeout=5.0)
-            if resp.status_code == 200:
-                self.finished.emit(resp.json())
-            else:
-                self.error.emit(f"HTTP {resp.status_code}")
+            stats = resp_stats.json() if resp_stats.status_code == 200 else {}
+            # 质量评分
+            resp_quality = httpx.get(
+                f"{base}/v1/quality/scores", params={"limit": 200}, timeout=5.0
+            )
+            quality = resp_quality.json() if resp_quality.status_code == 200 else {}
+            stats["quality_scores"] = quality.get("scores", [])
+            self.finished.emit(stats)
         except httpx.HTTPError as e:
             self.error.emit(str(e))
 
@@ -90,6 +95,7 @@ class DashboardPage(QWidget):
             ("总成本 ($)", "total_cost", "0.00"),
             ("节省 Token", "saved_tokens", "0"),
             ("节省率", "saved_ratio", "0%"),
+            ("平均质量分", "avg_quality", "-"),
         ]
         for i, (label, key, default) in enumerate(card_items):
             card = self._create_card(label, default)
@@ -122,6 +128,12 @@ class DashboardPage(QWidget):
         charts_layout_row2.addWidget(self.savings_chart)
 
         layout.addLayout(charts_layout_row2, 1)
+
+        # 图表区域 - 第三行：质量趋势
+        charts_layout_row3 = QHBoxLayout()
+        self.quality_chart = self._create_line_chart("质量趋势（原始 vs 压缩后）")
+        charts_layout_row3.addWidget(self.quality_chart)
+        layout.addLayout(charts_layout_row3, 1)
 
         # 底部模型分布表
         model_group = QGroupBox("模型分布")
@@ -232,6 +244,11 @@ class DashboardPage(QWidget):
 
         # 更新压缩节省图
         self._update_savings_chart(data.get("daily", []))
+
+        # 更新质量分卡片和趋势图
+        quality_scores = data.get("quality_scores", [])
+        self._update_quality_card(quality_scores)
+        self._update_quality_chart(quality_scores)
 
         # 更新模型分布
         by_model = data.get("by_model", [])
@@ -352,3 +369,61 @@ class DashboardPage(QWidget):
         chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
         series.attachAxis(axis_x)
         series.attachAxis(axis_y)
+
+    def _update_quality_card(self, scores: list[dict[str, Any]]) -> None:
+        if not scores:
+            self._set_card_value("avg_quality", "-")
+            return
+        original_scores = [
+            s["score_original"]
+            for s in scores
+            if s.get("score_original") is not None
+        ]
+        if original_scores:
+            avg = sum(original_scores) / len(original_scores)
+            self._set_card_value("avg_quality", f"{avg:.1f} / 5")
+        else:
+            self._set_card_value("avg_quality", "-")
+
+    def _update_quality_chart(self, scores: list[dict[str, Any]]) -> None:
+        chart = self.quality_chart.chart()
+        chart.removeAllSeries()
+        self._remove_all_axes(chart)
+
+        if not scores:
+            return
+
+        # 按时间正序排列
+        sorted_scores = sorted(scores, key=lambda s: s.get("created_at", ""))
+
+        series_original = QLineSeries()
+        series_original.setName("原始质量分")
+        series_compressed = QLineSeries()
+        series_compressed.setName("压缩后质量分")
+
+        categories = []
+        for i, s in enumerate(sorted_scores):
+            so = s.get("score_original")
+            sc = s.get("score_compressed")
+            if so is not None:
+                series_original.append(i, so)
+            if sc is not None:
+                series_compressed.append(i, sc)
+            ts = s.get("created_at", "")[:10]
+            categories.append(ts if ts else str(i))
+
+        chart.addSeries(series_original)
+        chart.addSeries(series_compressed)
+
+        axis_x = QBarCategoryAxis()
+        axis_x.append(categories)
+        axis_y = QValueAxis()
+        axis_y.setTitleText("质量分 (1-5)")
+        axis_y.setMin(0)
+        axis_y.setMax(5)
+        chart.addAxis(axis_x, Qt.AlignmentFlag.AlignBottom)
+        chart.addAxis(axis_y, Qt.AlignmentFlag.AlignLeft)
+        series_original.attachAxis(axis_x)
+        series_original.attachAxis(axis_y)
+        series_compressed.attachAxis(axis_x)
+        series_compressed.attachAxis(axis_y)

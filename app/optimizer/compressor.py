@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.providers import ChatMessage
 
 CompressionAction = Literal["keep", "summarize", "drop"]
+InfoType = Literal["code", "reasoning", "context", "dialog", "other"]
 
 
 @dataclass
@@ -16,6 +17,7 @@ class CompressionDecision:
     action: CompressionAction
     reason: str
     summary: str | None = None
+    info_type: InfoType = "other"
 
 
 @dataclass
@@ -112,24 +114,38 @@ class Compressor:
 
         # 系统消息、开发者消息永远保留
         if message.role in ("system", "developer"):
-            return CompressionDecision("keep", "系统/开发者消息")
+            return CompressionDecision("keep", "系统/开发者消息", info_type="context")
+
+        # 检测信息类型
+        info_type: InfoType = "other"
+        if "```" in message.content or any(
+            kw in content
+            for kw in ["代码", "函数", "类", "变量", "参数", "返回值", "bug", "错误"]
+        ):
+            info_type = "code"
+        elif any(kw in content for kw in ["因为", "所以", "如果", "那么", "推理", "逻辑", "分析"]):
+            info_type = "reasoning"
+        elif any(kw in content for kw in ["项目", "背景", "上下文", "环境", "配置", "需求"]):
+            info_type = "context"
+        elif message.role in ("user", "assistant"):
+            info_type = "dialog"
 
         # 包含代码块、关键技术信息 -> keep
         if "```" in message.content or any(kw in content for kw in self.KEEP_KEYWORDS):
-            return CompressionDecision("keep", "包含关键技术信息/代码")
+            return CompressionDecision("keep", "包含关键技术信息/代码", info_type=info_type)
 
         # 纯寒暄、确认类 -> drop
         if len(message.content) < 50 and any(
             kw in content for kw in self.DROP_KEYWORDS
         ):
-            return CompressionDecision("drop", "纯寒暄/确认类")
+            return CompressionDecision("drop", "纯寒暄/确认类", info_type="dialog")
 
         # 长文本且非关键 -> summarize
         if len(message.content) > 500:
-            return CompressionDecision("summarize", "长文本非关键内容")
+            return CompressionDecision("summarize", "长文本非关键内容", info_type=info_type)
 
         # 默认保留
-        return CompressionDecision("keep", "默认保留")
+        return CompressionDecision("keep", "默认保留", info_type=info_type)
 
     async def _classify_by_llm(
         self, message: ChatMessage, context_hint: str = ""
@@ -304,6 +320,7 @@ class Compressor:
                     "role": mw.original.role,
                     "action": mw.decision.action,
                     "reason": mw.decision.reason,
+                    "info_type": mw.decision.info_type,
                     "original_tokens": mw.tokens,
                     "saved_tokens": (
                         mw.tokens

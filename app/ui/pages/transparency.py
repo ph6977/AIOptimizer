@@ -76,12 +76,13 @@ class TransparencyPage(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["消息", "动作", "原因", "Token", "节省"])
-        self.tree.setColumnWidth(0, 300)
-        self.tree.setColumnWidth(1, 80)
-        self.tree.setColumnWidth(2, 150)
-        self.tree.setColumnWidth(3, 80)
-        self.tree.setColumnWidth(4, 80)
+        self.tree.setHeaderLabels(["消息", "动作", "类型", "原因", "Token", "节省"])
+        self.tree.setColumnWidth(0, 280)
+        self.tree.setColumnWidth(1, 70)
+        self.tree.setColumnWidth(2, 80)
+        self.tree.setColumnWidth(3, 140)
+        self.tree.setColumnWidth(4, 70)
+        self.tree.setColumnWidth(5, 70)
         self.tree.itemClicked.connect(self._on_item_clicked)
         left_layout.addWidget(self.tree)
 
@@ -152,21 +153,33 @@ class TransparencyPage(QWidget):
 
         kept = summarized = dropped = saved_total = 0
 
+        # 信息类型颜色映射
+        INFO_COLORS: dict[str, str] = {
+            "code": "#3498db",
+            "reasoning": "#9b59b6",
+            "context": "#2ecc71",
+            "dialog": "#f39c12",
+            "other": "#95a5a6",
+        }
+
         for record in data:
             role = record.get("role", "unknown")
             action = record.get("action", "keep")
             reason = record.get("reason", "")
+            info_type = record.get("info_type", "other")
             original_tokens = record.get("original_tokens", 0)
             saved_tokens = record.get("saved_tokens", 0)
             original_content = record.get("original_content", "")
             summary_content = record.get("summary_content", "")
 
-            display_text = f"[{role}] {original_content[:60]}{'...' if len(original_content) > 60 else ''}"
+            type_tag = f"[{info_type}]"
+            display_text = f"{type_tag} [{role}] {original_content[:50]}{'...' if len(original_content) > 50 else ''}"
 
             item = QTreeWidgetItem(
                 [
                     display_text,
                     action.upper(),
+                    info_type,
                     reason,
                     str(original_tokens),
                     f"+{saved_tokens}" if saved_tokens else "0",
@@ -179,6 +192,7 @@ class TransparencyPage(QWidget):
                     "role": role,
                     "action": action,
                     "reason": reason,
+                    "info_type": info_type,
                     "original_tokens": original_tokens,
                     "saved_tokens": saved_tokens,
                     "original": original_content,
@@ -201,18 +215,33 @@ class TransparencyPage(QWidget):
         )
 
         # 颜色标记
+        INFO_COLORS: dict[str, str] = {
+            "code": "#3498db",
+            "reasoning": "#9b59b6",
+            "context": "#2ecc71",
+            "dialog": "#f39c12",
+            "other": "#95a5a6",
+        }
         for i in range(self.tree.topLevelItemCount()):
             item_opt = self.tree.topLevelItem(i)
             if item_opt is None:
                 continue
             item = item_opt
             action = item.text(1)
+            info_type = item.text(2)
             if action == "KEEP":
                 item.setBackground(1, Qt.GlobalColor.green)
             elif action == "SUMMARIZE":
                 item.setBackground(1, Qt.GlobalColor.yellow)
             elif action == "DROP":
                 item.setBackground(1, Qt.GlobalColor.red)
+            # info_type 列颜色
+            color = INFO_COLORS.get(info_type, "")
+            if color:
+                from PySide6.QtGui import QColor
+
+                item.setBackground(2, QColor(color))
+                item.setForeground(2, QColor("white"))
 
     def _on_error(self, err: str) -> None:
         QMessageBox.warning(self, "错误", f"获取失败: {err}")
@@ -227,6 +256,7 @@ class TransparencyPage(QWidget):
 
         detail = f"""角色: {data['role']}
 动作: {data['action'].upper()}
+类型: {data.get('info_type', 'other')}
 原因: {data['reason']}
 原始 Token: {data['original_tokens']}
 节省 Token: {data['saved_tokens']}
