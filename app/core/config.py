@@ -238,22 +238,9 @@ class Settings(BaseSettings):
 
     @staticmethod
     def _load_env_keys() -> dict[str, str]:
-        """从 .env 文件和系统环境变量中读取 API Key"""
+        """仅从 .env 文件读取 API Key（不依赖系统环境变量）"""
         result: dict[str, str] = {}
 
-        # 先读系统环境变量
-        for key in [
-            "OPENAI_API_KEY",
-            "DEEPSEEK_API_KEY",
-            "GLM_API_KEY",
-            "QWEN_API_KEY",
-            "KIMI_API_KEY",
-        ]:
-            val = os.getenv(key, "")
-            if val:
-                result[key] = val
-
-        # 再读 .env 文件（覆盖系统变量中没有的）
         env_path = Path(".env")
         if env_path.exists():
             for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -262,7 +249,7 @@ class Settings(BaseSettings):
                     continue
                 key, _, value = line.partition("=")
                 key = key.strip()
-                if key.endswith("_API_KEY") and key not in result:
+                if key.endswith("_API_KEY"):
                     result[key] = value.strip()
 
         return result
