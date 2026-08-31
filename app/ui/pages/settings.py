@@ -1,5 +1,6 @@
 """设置页面"""
 
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -178,40 +179,42 @@ class SettingsPage(QWidget):
             )
 
         if not providers:
-            # 默认添加几个常见的
+            # 默认添加几个常见的（从环境变量/.env 读取 API Key）
+            from app.core.config import Settings
+            env_keys = Settings._load_env_keys()
             defaults = [
                 (
                     "openai",
                     "OpenAI",
-                    "",
+                    env_keys.get("OPENAI_API_KEY", ""),
                     "https://api.openai.com/v1",
                     "gpt-4o,gpt-4o-mini",
                 ),
                 (
                     "deepseek",
                     "DeepSeek",
-                    "",
-                    "https://api.deepseek.com",
+                    env_keys.get("DEEPSEEK_API_KEY", ""),
+                    "https://api.deepseek.com/v1",
                     "deepseek-chat,deepseek-reasoner",
                 ),
                 (
                     "glm",
                     "Zhipu GLM",
-                    "",
+                    env_keys.get("GLM_API_KEY", ""),
                     "https://open.bigmodel.cn/api/paas/v4",
                     "glm-4,glm-4v",
                 ),
                 (
                     "qwen",
                     "Alibaba Qwen",
-                    "",
+                    env_keys.get("QWEN_API_KEY", ""),
                     "https://dashscope.aliyuncs.com/compatible-mode/v1",
                     "qwen-max,qwen-plus,qwen-turbo",
                 ),
                 (
                     "kimi",
                     "Moonshot Kimi",
-                    "",
+                    env_keys.get("KIMI_API_KEY", ""),
                     "https://api.moonshot.cn/v1",
                     "moonshot-v1-8k,moonshot-v1-32k,moonshot-v1-128k",
                 ),
@@ -339,6 +342,7 @@ class SettingsPage(QWidget):
 
         # 收集 Provider
         providers_list: list[dict[str, Any]] = []
+        env_lines: list[str] = []
         for row in range(self.provider_table.rowCount()):
             name_item = self.provider_table.item(row, 0)
             display_item = self.provider_table.item(row, 1)
@@ -350,15 +354,18 @@ class SettingsPage(QWidget):
             if not name_item or not name_item.text().strip():
                 continue
 
+            name = name_item.text().strip()
+            api_key = cast(QLineEdit, key_widget).text() if key_widget else ""
+
             providers_list.append(
                 {
-                    "name": name_item.text().strip(),
+                    "name": name,
                     "display_name": (
                         display_item.text().strip()
                         if display_item
-                        else name_item.text().strip()
+                        else name
                     ),
-                    "api_key": cast(QLineEdit, key_widget).text() if key_widget else "",
+                    "api_key": api_key,
                     "base_url": url_item.text().strip() if url_item else "",
                     "models": (
                         [m.strip() for m in models_item.text().split(",")]
@@ -374,6 +381,62 @@ class SettingsPage(QWidget):
                 }
             )
 
+            # 收集 API Key 到环境变量格式
+            if api_key:
+                env_key = f"{name.upper()}_API_KEY"
+                env_lines.append(f"{env_key}={api_key}")
+
         settings.set_providers([ProviderConfig(**p) for p in providers_list])
+
+        # 持久化 API Key 到 .env 文件
+        self._save_api_keys_to_env(env_lines)
+
         self.config_saved.emit()
-        QMessageBox.information(self, "成功", "配置已保存（运行时生效，重启后丢失）")
+        QMessageBox.information(self, "成功", "配置已保存（运行时生效，API Key 已持久化）")
+
+    def _save_api_keys_to_env(self, new_env_lines: list[str]) -> None:
+        """将 API Key 保存到 .env 文件"""
+        env_path = Path(__file__).parent.parent.parent.parent / ".env"
+
+        # 读取现有 .env 内容
+        existing_lines: list[str] = []
+        if env_path.exists():
+            existing_lines = env_path.read_text(encoding="utf-8").splitlines()
+
+        # 解析现有环境变量（保留非 Provider 的行）
+        env_dict: dict[str, str] = {}
+        provider_keys: set[str] = set()
+        for line in existing_lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                env_dict[line] = ""
+                continue
+            if "=" in line:
+                key, _, value = line.partition("=")
+                env_dict[key] = value
+                # 标记 Provider 相关的 Key
+                if key.endswith("_API_KEY") and key not in (
+                    "JUDGE_API_KEY",
+                    "AIOPTIMIZER_TEST_MODE",
+                ):
+                    provider_keys.add(key)
+
+        # 删除旧的 Provider Key
+        for key in provider_keys:
+            env_dict.pop(key, None)
+
+        # 添加新的 Provider Key
+        for line in new_env_lines:
+            if "=" in line:
+                key, _, value = line.partition("=")
+                env_dict[key] = value
+
+        # 写回 .env 文件
+        lines: list[str] = []
+        for key, value in env_dict.items():
+            if value == "":
+                lines.append(key)  # 注释或空行
+            else:
+                lines.append(f"{key}={value}")
+
+        env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

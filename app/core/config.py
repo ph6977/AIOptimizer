@@ -168,9 +168,104 @@ class Settings(BaseSettings):
 
         try:
             data = json.loads(self.providers_json)
-            return [ProviderConfig(**p) for p in data]
+            if data:
+                return [ProviderConfig(**p) for p in data]
         except (json.JSONDecodeError, TypeError, ValueError):
-            return []
+            pass
+
+        # 如果没有保存的 Provider，从环境变量加载默认列表
+        return self._get_default_providers()
+
+    def _get_default_providers(self) -> list[ProviderConfig]:
+        """从环境变量/.env 加载默认 Provider 列表"""
+        env_keys = self._load_env_keys()
+        return [
+            ProviderConfig(
+                name="openai",
+                display_name="OpenAI",
+                api_key=env_keys.get("OPENAI_API_KEY", ""),
+                base_url="https://api.openai.com/v1",
+                models=["gpt-4o", "gpt-4o-mini"],
+                enabled=True,
+                priority=0,
+            ),
+            ProviderConfig(
+                name="deepseek",
+                display_name="DeepSeek",
+                api_key=env_keys.get("DEEPSEEK_API_KEY", ""),
+                base_url="https://api.deepseek.com/v1",
+                models=["deepseek-chat", "deepseek-reasoner"],
+                enabled=True,
+                priority=0,
+            ),
+            ProviderConfig(
+                name="glm",
+                display_name="Zhipu GLM",
+                api_key=env_keys.get("GLM_API_KEY", ""),
+                base_url="https://open.bigmodel.cn/api/paas/v4",
+                models=["glm-4", "glm-4v"],
+                enabled=True,
+                priority=0,
+            ),
+            ProviderConfig(
+                name="qwen",
+                display_name="Alibaba Qwen",
+                api_key=env_keys.get("QWEN_API_KEY", ""),
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                models=["qwen-max", "qwen-plus", "qwen-turbo"],
+                enabled=True,
+                priority=0,
+            ),
+            ProviderConfig(
+                name="kimi",
+                display_name="Moonshot Kimi",
+                api_key=env_keys.get("KIMI_API_KEY", ""),
+                base_url="https://api.moonshot.cn/v1",
+                models=["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
+                enabled=True,
+                priority=0,
+            ),
+            ProviderConfig(
+                name="ollama",
+                display_name="Ollama (本地)",
+                api_key="",
+                base_url="http://localhost:11434/v1",
+                models=["llama3.1", "qwen2.5", "deepseek-r1"],
+                enabled=True,
+                priority=0,
+            ),
+        ]
+
+    @staticmethod
+    def _load_env_keys() -> dict[str, str]:
+        """从 .env 文件和系统环境变量中读取 API Key"""
+        result: dict[str, str] = {}
+
+        # 先读系统环境变量
+        for key in [
+            "OPENAI_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "GLM_API_KEY",
+            "QWEN_API_KEY",
+            "KIMI_API_KEY",
+        ]:
+            val = os.getenv(key, "")
+            if val:
+                result[key] = val
+
+        # 再读 .env 文件（覆盖系统变量中没有的）
+        env_path = Path(".env")
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                if key.endswith("_API_KEY") and key not in result:
+                    result[key] = value.strip()
+
+        return result
 
     def set_providers(self, providers: list[ProviderConfig]) -> None:
         """

@@ -198,7 +198,13 @@ class OpenAICompatibleAdapter(ProviderAdapter):
         resp = await client.post("/chat/completions", json=payload)
         resp.raise_for_status()
         data = resp.json()
-        return ChatCompletionResponse(**data)
+        return ChatCompletionResponse(
+            id=data.get("id", ""),
+            model=data.get("model", ""),
+            choices=data.get("choices", []),
+            usage=data.get("usage"),
+            created=data.get("created", 0),
+        )
 
     async def chat_completion_stream(
         self, request: ChatCompletionRequest
@@ -470,7 +476,18 @@ class ProviderFactory:
     def create(cls, provider_config: "ProviderConfig") -> ProviderAdapter:
         key = f"{provider_config.name}:{provider_config.api_key[:8]}"
         if key in cls._adapters:
-            return cls._adapters[key]
+            cached = cls._adapters[key]
+            # 如果 base_url 变了，重建 adapter
+            if cached.base_url == provider_config.base_url:
+                return cached
+            # base_url 变了，关闭旧连接并重建
+            import asyncio
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(cached.close())
+            except RuntimeError:
+                pass
 
         adapter: ProviderAdapter
         if provider_config.name in (

@@ -236,6 +236,35 @@ def build_provider_configs() -> list[ProviderConfig]:
     return settings.get_providers()
 
 
+def _infer_provider(model: str, providers: list[ProviderConfig]) -> str:
+    """从模型名推断所属 provider 名称"""
+    model_lower = model.lower()
+    # 按特征匹配
+    keyword_map: dict[str, list[str]] = {
+        "deepseek": ["deepseek"],
+        "openai": ["gpt", "o1", "o3", "o4"],
+        "glm": ["glm"],
+        "qwen": ["qwen"],
+        "kimi": ["moonshot", "kimi"],
+        "ollama": ["llama", "mistral", "codellama", "phi", "gemma", "qwen2"],
+        "anthropic": ["claude"],
+        "gemini": ["gemini"],
+    }
+    for provider_name, keywords in keyword_map.items():
+        if any(kw in model_lower for kw in keywords):
+            # 确认该 provider 确实存在且有 key
+            matched = next(
+                (p for p in providers if p.name == provider_name and p.api_key), None
+            )
+            if matched:
+                return provider_name
+    # 回退到第一个有 key 的 provider
+    for p in providers:
+        if p.api_key:
+            return p.name
+    return providers[0].name if providers else "openai"
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "version": "0.1.0"}
@@ -313,14 +342,13 @@ async def chat_completions(request: Request) -> Response:
         selected_provider_name = routing_decision.provider
     else:
         # 使用指定模型或第一个可用
-        selected_provider_name = (
-            original_model.split("/")[0] if "/" in original_model else providers[0].name
-        )
-        chat_request.model = (
-            original_model.split("/")[-1]
-            if "/" in original_model
-            else providers[0].models[0]
-        )
+        if "/" in original_model:
+            selected_provider_name = original_model.split("/")[0]
+            chat_request.model = original_model.split("/")[-1]
+        else:
+            # 没有 provider/ 前缀，尝试从模型名推断 provider
+            selected_provider_name = _infer_provider(original_model, providers)
+            chat_request.model = original_model
 
     # 找到选中的 Provider 配置
     provider_config = next(
