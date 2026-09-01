@@ -53,6 +53,7 @@ class MainWindow(QMainWindow):
 
     def _init_tray(self) -> None:
         self.tray = QSystemTrayIcon(self)
+        self.tray.setIcon(self.windowIcon())
         self.tray.setToolTip("AIOptimizer - AI 优化网关")
 
         # 创建菜单
